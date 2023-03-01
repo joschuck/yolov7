@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-from threading import Thread
 
 import numpy as np
 import torch
@@ -11,7 +10,7 @@ from tqdm import tqdm
 
 from models.experimental import attempt_load
 from utils.datasets import create_dataloader
-from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, check_requirements, \
+from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_shape, check_requirements, \
     box_iou, non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, set_logging, increment_path, colorstr
 from utils.metrics import ap_per_class, ConfusionMatrix
 from utils.plots import plot_images, output_to_target, plot_study_txt
@@ -22,7 +21,7 @@ import cv2
 def test(data,
          weights=None,
          batch_size=32,
-         imgsz=640,
+         img_shape=(640, 640, 3),
          conf_thres=0.001,
          iou_thres=0.6,  # for NMS
          save_json=False,
@@ -38,11 +37,11 @@ def test(data,
          save_hybrid=False,  # for hybrid auto-labelling
          save_conf=False,  # save auto-label confidences
          plots=True,
-         wandb_logger=None,		 
-		 compute_loss=None,
+         wandb_logger=None,
+         compute_loss=None,
          half_precision=True,
          is_coco=False,
-         opt=None,		 		 
+         opt=None,
          tidl_load=False,
          dump_img=False,
          kpt_label=False,
@@ -63,7 +62,7 @@ def test(data,
         # Load model
         model = attempt_load(weights, map_location=device)  # load FP32 model
         gs = max(int(model.stride.max()), 32)  # grid size (max stride)
-        imgsz = check_img_size(imgsz, s=gs)  # check img_size
+        img_shape = check_img_shape(img_shape, s=gs)  # check img_size
 
         # Multi-GPU disabled, incompatible with .half() https://github.com/ultralytics/yolov5/issues/99
         # if device.type != 'cpu' and torch.cuda.device_count() > 1:
@@ -77,7 +76,7 @@ def test(data,
     # Configure
     model.eval()
     model.model[-1].flip_test = False
-    model.model[-1].flip_index = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
+    model.model[-1].flip_index = data['flip_index']
     if isinstance(data, str):
         is_coco = data.endswith('coco.yaml') or data.endswith('coco_kpts.yaml')
         with open(data) as f:
@@ -94,9 +93,9 @@ def test(data,
     # Dataloader
     if not training:
         if device.type != 'cpu':
-            model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+            model(torch.zeros(1, 3, img_shape, img_shape).to(device).type_as(next(model.parameters())))  # run once
         task = opt.task if opt.task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
-        dataloader = create_dataloader(data[task], imgsz, batch_size, gs, opt, pad=0.5, rect=True,
+        dataloader = create_dataloader(data[task], img_shape, batch_size, gs, opt, pad=0.5,
                                        prefix=colorstr(f'{task}: '), tidl_load=tidl_load, kpt_label=kpt_label)[0]
 
     seen = 0
@@ -288,7 +287,7 @@ def test(data,
             print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap[i]))
 
     # Print speeds
-    t = tuple(x / seen * 1E3 for x in (t0, t1, t0 + t1)) + (imgsz, imgsz, batch_size)  # tuple
+    t = tuple(x / seen * 1E3 for x in (t0, t1, t0 + t1)) + (img_shape, img_shape, batch_size)  # tuple
     if not training:
         print('Speed: %.1f/%.1f/%.1f ms inference/NMS/total per %gx%g image at batch-size %g' % t)
 

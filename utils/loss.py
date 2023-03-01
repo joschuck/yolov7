@@ -109,14 +109,19 @@ class ComputeLoss:
         det = model.module.model[-1] if is_parallel(model) else model.model[-1]  # Detect() module
         self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.06, .02])  # P3-P7
         self.ssi = list(det.stride).index(16) if autobalance else 0  # stride 16 index
-        self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, model.gr, h, autobalance
+        self.BCEcls = BCEcls
+        self.BCEobj = BCEobj
+        self.gr = model.gr
+        self.hyp = h
+        self.sigmas = model.sigmas
+        self.autobalance = autobalance
         for k in 'na', 'nc', 'nl', 'anchors', 'nkpt':
             setattr(self, k, getattr(det, k))
 
     def __call__(self, p, targets):  # predictions, targets, model
         device = targets.device
         lcls, lbox, lobj, lkpt, lkptv = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
-        sigmas = torch.tensor([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89], device=device) / 10.0
+        sigmas = torch.tensor(self.sigmas, device=device) / 10.0
         tcls, tbox, tkpt, indices, anchors = self.build_targets(p, targets)  # targets
 
         # Losses
@@ -183,10 +188,8 @@ class ComputeLoss:
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, tkpt, indices, anch = [], [], [], [], []
-        if self.kpt_label:
-            gain = torch.ones(41, device=targets.device)  # normalized to gridspace gain
-        else:
-            gain = torch.ones(7, device=targets.device)  # normalized to gridspace gain
+        # https://towardsdatascience.com/calculating-loss-of-yolo-v3-layer-8878bfaaf1ff
+        gain = torch.ones(7 + 2 * self.nkpt, device=targets.device)  # normalized to gridspace gain
         ai = torch.arange(na, device=targets.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
         targets = torch.cat((targets.repeat(na, 1, 1), ai[:, :, None]), 2)  # append anchor indices
 
@@ -198,10 +201,7 @@ class ComputeLoss:
 
         for i in range(self.nl):
             anchors, shape = self.anchors[i], p[i].shape
-            if self.kpt_label:
-                gain[2:40] = torch.tensor(p[i].shape)[19*[3, 2]]  # xyxy gain
-            else:
-                gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
+            gain[2:-1] = torch.tensor(p[i].shape)[(self.nkpt+2)*[3, 2]]  # xyxy gain
 
             # Match targets to anchors
             t = targets * gain

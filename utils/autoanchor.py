@@ -1,4 +1,5 @@
 # Auto-anchor utils
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -19,12 +20,13 @@ def check_anchor_order(m):
         m.anchor_grid[:] = m.anchor_grid.flip(0)
 
 
-def check_anchors(dataset, model, thr=4.0, imgsz=640):
+def check_anchors(dataset, model, thr=4.0, img_shape: Tuple[int, int]= (640, 640)):
     # Check anchor fit to data, recompute if necessary
     prefix = colorstr('autoanchor: ')
     print(f'\n{prefix}Analyzing anchors... ', end='')
     m = model.module.model[-1] if hasattr(model, 'module') else model.model[-1]  # Detect()
-    shapes = imgsz * dataset.shapes / dataset.shapes.max(1, keepdims=True)
+
+    shapes = img_shape * dataset.shapes / dataset.shapes.max(1, keepdims=True)
     scale = np.random.uniform(0.9, 1.1, size=(shapes.shape[0], 1))  # augment scale
     wh = torch.tensor(np.concatenate([l[:, 3:5] * s for s, l in zip(shapes * scale, dataset.labels)])).float()  # wh
 
@@ -43,12 +45,13 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640):
         print('. Attempting to improve anchors, please wait...')
         na = m.anchor_grid.numel() // 2  # number of anchors
         try:
-            anchors = kmean_anchors(dataset, n=na, img_size=imgsz, thr=thr, gen=1000, verbose=False)
+            anchors = kmean_anchors(dataset, n=na, img_shape=img_shape, thr=thr, gen=1000, verbose=False)
         except Exception as e:
             print(f'{prefix}ERROR: {e}')
         new_bpr = metric(anchors)[0]
         if new_bpr > bpr:  # replace anchors
             anchors = torch.tensor(anchors, device=m.anchors.device).type_as(m.anchors)
+            #anchors = torch.tensor(anchors, device='mps', dtype=torch.float32)
             m.anchor_grid[:] = anchors.clone().view_as(m.anchor_grid)  # for inference
             m.anchors[:] = anchors.clone().view_as(m.anchors) / m.stride.to(m.anchors.device).view(-1, 1, 1)  # loss
             check_anchor_order(m)
@@ -58,13 +61,13 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640):
     print('')  # newline
 
 
-def kmean_anchors(path='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen=1000, verbose=True):
+def kmean_anchors(path='./data/coco128.yaml', n=9, img_shape=(640, 640), thr=4.0, gen=1000, verbose=True):
     """ Creates kmeans-evolved anchors from training dataset
 
         Arguments:
             path: path to dataset *.yaml, or a loaded dataset
             n: number of anchors
-            img_size: image size used for training
+            img_shape: image shape used for training
             thr: anchor-label wh ratio threshold hyperparameter hyp['anchor_t'] used for training, default=4.0
             gen: generations to evolve anchors using genetic algorithm
             verbose: print all results
@@ -95,7 +98,7 @@ def kmean_anchors(path='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen=10
         x, best = metric(k, wh0)
         bpr, aat = (best > thr).float().mean(), (x > thr).float().mean() * n  # best possible recall, anch > thr
         print(f'{prefix}thr={thr:.2f}: {bpr:.4f} best possible recall, {aat:.2f} anchors past thr')
-        print(f'{prefix}n={n}, img_size={img_size}, metric_all={x.mean():.3f}/{best.mean():.3f}-mean/best, '
+        print(f'{prefix}n={n}, img_shape={img_shape}, metric_all={x.mean():.3f}/{best.mean():.3f}-mean/best, '
               f'past_thr={x[x > thr].mean():.3f}-mean: ', end='')
         for i, x in enumerate(k):
             print('%i,%i' % (round(x[0]), round(x[1])), end=',  ' if i < len(k) - 1 else '\n')  # use in *.cfg
@@ -105,12 +108,12 @@ def kmean_anchors(path='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen=10
         with open(path) as f:
             data_dict = yaml.safe_load(f)  # model dict
         from utils.datasets import LoadImagesAndLabels
-        dataset = LoadImagesAndLabels(data_dict['train'], augment=True, rect=True)
+        dataset = LoadImagesAndLabels(data_dict['train'], augment=True)
     else:
         dataset = path  # dataset
 
     # Get label wh
-    shapes = img_size * dataset.shapes / dataset.shapes.max(1, keepdims=True)
+    shapes = max(img_shape) * dataset.shapes / dataset.shapes.max(1, keepdims=True)
     wh0 = np.concatenate([l[:, 3:5] * s for s, l in zip(shapes, dataset.labels)])  # wh
 
     # Filter

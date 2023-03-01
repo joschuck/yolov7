@@ -65,7 +65,7 @@ def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
     return filtfilt(b, a, data)  # forward-backward filter
 
 
-def plot_one_box(x, im, color=None, label=None, line_thickness=3, kpt_label=False, kpts=None, steps=2, orig_shape=None):
+def plot_one_box(x, im, orig_shape, color=None, label=None, line_thickness=3, nkpt=17, kpts=None, steps=2, skeleton=None):
     # Plots one bounding box on image 'im' using OpenCV
     assert im.data.contiguous, 'Image not contiguous. Apply np.ascontiguousarray(im) to plot_on_box() input image.'
     tl = line_thickness or round(0.002 * (im.shape[0] + im.shape[1]) / 2) + 1  # line/font thickness
@@ -80,11 +80,11 @@ def plot_one_box(x, im, color=None, label=None, line_thickness=3, kpt_label=Fals
             c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
             cv2.rectangle(im, c1, c2, color, -1, cv2.LINE_AA)  # filled
             cv2.putText(im, label, (c1[0], c1[1] - 2), 0, tl / 6, [225, 255, 255], thickness=tf//2, lineType=cv2.LINE_AA)
-    if kpt_label:
-        plot_skeleton_kpts(im, kpts, steps, orig_shape=orig_shape)
+    if nkpt:
+        plot_skeleton_kpts(im, orig_shape, kpts, steps, skeleton)
 
 
-def plot_skeleton_kpts(im, kpts, steps, orig_shape=None):
+def plot_skeleton_kpts(im, shape, kpts, steps, skeleton):
     #Plot the skeleton and keypointsfor coco datatset
     palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102],
                         [230, 230, 0], [255, 153, 255], [153, 204, 255],
@@ -94,19 +94,15 @@ def plot_skeleton_kpts(im, kpts, steps, orig_shape=None):
                         [51, 255, 51], [0, 255, 0], [0, 0, 255], [255, 0, 0],
                         [255, 255, 255]])
 
-    skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12],
-                [7, 13], [6, 7], [6, 8], [7, 9], [8, 10], [9, 11], [2, 3],
-                [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
-
     pose_limb_color = palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
     pose_kpt_color = palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
-    radius = 5
+    radius = 3
     num_kpts = len(kpts) // steps
 
     for kid in range(num_kpts):
         r, g, b = pose_kpt_color[kid]
         x_coord, y_coord = kpts[steps * kid], kpts[steps * kid + 1]
-        if not (x_coord % 640 == 0 or y_coord % 640 == 0):
+        if not (x_coord % shape[1] == 0 or y_coord % shape[0] == 0):
             if steps == 3:
                 conf = kpts[steps * kid + 2]
                 if conf < 0.5:
@@ -122,9 +118,9 @@ def plot_skeleton_kpts(im, kpts, steps, orig_shape=None):
             conf2 = kpts[(sk[1]-1)*steps+2]
             if conf1<0.5 or conf2<0.5:
                 continue
-        if pos1[0]%640 == 0 or pos1[1]%640==0 or pos1[0]<0 or pos1[1]<0:
+        if pos1[0] % shape[1] == 0 or pos1[1] % shape[0] == 0 or pos1[0] < 0 or pos1[1] < 0:
             continue
-        if pos2[0] % 640 == 0 or pos2[1] % 640 == 0 or pos2[0]<0 or pos2[1]<0:
+        if pos2[0] % shape[1] == 0 or pos2[1] % shape[0] == 0 or pos2[0] < 0 or pos2[1] < 0:
             continue
         cv2.line(im, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
 
@@ -175,7 +171,19 @@ def output_to_target(output):
     return np.array(targets)
 
 
-def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=640, max_subplots=16, kpt_label=True, steps=2, orig_shape=None):
+def plot_images(
+    images,
+    targets,
+    paths=None,
+    fname='images.jpg',
+    names=None,
+    shape=(640, 640, 3),
+    max_subplots=16,
+    nkpt=17,
+    skeleton=None,
+    steps=2,
+    orig_shape=None
+):
     # Plot image grid with labels
 
     if isinstance(images, torch.Tensor):
@@ -194,12 +202,13 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
     ns = np.ceil(bs ** 0.5)  # number of subplots (square)
 
     # Check if we should resize
-    scale_factor = max_size / max(h, w)
-    if scale_factor < 1:
-        h = math.ceil(scale_factor * h)
-        w = math.ceil(scale_factor * w)
+    scale_factor_w = min(shape[1] / w, 1.)
+    scale_factor_h = min(shape[0] / h, 1.)
 
-    mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)  # init
+    h = math.ceil(scale_factor_h * h)
+    w = math.ceil(scale_factor_w * w)
+
+    mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)
     for i, img in enumerate(images):
         if i == max_subplots:  # if last batch has fewer images than we expect
             break
@@ -208,17 +217,18 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         block_y = int(h * (i % ns))
 
         img = img.transpose(1, 2, 0)
-        if scale_factor < 1:
-            img = cv2.resize(img, (w, h))
+        img = np.repeat(img, 3, axis=-1)
+        # img = np.stack((img,) * 3, axis=-1)
+        img = cv2.resize(img, (w, h))
 
         mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
         if len(targets) > 0:
             image_targets = targets[targets[:, 0] == i]
             boxes = xywh2xyxy(image_targets[:, 2:6]).T
             classes = image_targets[:, 1].astype('int')
-            labels = image_targets.shape[1] == 40 if kpt_label else image_targets.shape[1] == 6   # labels if no conf column
+            labels = image_targets.shape[1] == nkpt * 2 + 6 if nkpt else image_targets.shape[1] == 6   # labels if no conf column
             conf = None if labels else image_targets[:, 6]  # check for confidence presence (label vs pred)
-            if kpt_label:
+            if nkpt:
                 if conf is None:
                     kpts = image_targets[:, 6:].T   #kpts for GT
                 else:
@@ -230,18 +240,18 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                 if boxes.max() <= 1.01:  # if normalized with tolerance 0.01
                     boxes[[0, 2]] *= w  # scale to pixels
                     boxes[[1, 3]] *= h
-                elif scale_factor < 1:  # absolute coords need scale if image scales
-                    boxes *= scale_factor
+                # absolute coords need scale if image scales
+                boxes[:, 0::2] *= scale_factor_w
+                boxes[:, 1::2] *= scale_factor_h
             boxes[[0, 2]] += block_x
             boxes[[1, 3]] += block_y
 
-            if kpt_label and kpts.shape[1]:
+            if nkpt and kpts.shape[1]:
                 if kpts.max()<1.01:
                     kpts[list(range(0,len(kpts),steps))] *=w # scale to pixels
                     kpts[list(range(1,len(kpts),steps))] *= h
-                elif scale_factor < 1 :
-                    kpts[list(range(0, len(kpts), steps))] *= scale_factor
-                    kpts[list(range(1, len(kpts), steps))] *= scale_factor
+                kpts[list(range(0, len(kpts), steps))] *= scale_factor_w
+                kpts[list(range(1, len(kpts), steps))] *= scale_factor_h
                 kpts[list(range(0, len(kpts), steps))] += block_x
                 kpts[list(range(1, len(kpts), steps))] += block_y
 
@@ -251,10 +261,10 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                 cls = names[cls] if names else cls
                 if labels or conf[j] > 0.1:  # 0.25 conf thresh
                     label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
-                    if kpt_label:
-                        plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl, kpt_label=kpt_label, kpts=kpts[:,j], steps=steps, orig_shape=orig_shape)
+                    if nkpt:
+                        plot_one_box(box, mosaic, shape, label=label, color=color, line_thickness=tl, nkpt=nkpt, kpts=kpts[:,j], steps=steps, skeleton=skeleton)
                     else:
-                        plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl, kpt_label=kpt_label, orig_shape=orig_shape)
+                        plot_one_box(box, mosaic, shape, label=label, color=color, line_thickness=tl, nkpt=nkpt)
                     #cv2.imwrite(Path(paths[i]).name.split('.')[0] + "_box_{}.".format(j) + Path(paths[i]).name.split('.')[1], mosaic[:,:,::-1]) # used for debugging the dataloader pipeline
 
         # Draw image filename labels

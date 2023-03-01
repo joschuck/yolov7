@@ -12,6 +12,7 @@ import time
 from itertools import repeat
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
+from typing import Tuple
 
 import cv2
 import numpy as np
@@ -19,6 +20,7 @@ import pandas as pd
 import torch
 import torchvision
 import yaml
+from numpy._typing import ArrayLike
 
 from utils.google_utils import gsutil_getsize
 from utils.metrics import fitness
@@ -127,12 +129,14 @@ def check_requirements(requirements='requirements.txt', exclude=()):
         print(emojis(s))  # emoji-safe
 
 
-def check_img_size(img_size, s=32):
+def check_img_shape(img_shape: ArrayLike, s=32):
     # Verify img_size is a multiple of stride s
-    new_size = make_divisible(img_size, int(s))  # ceil gs-multiple
-    if new_size != img_size:
-        print('WARNING: --img-size %g must be multiple of max stride %g, updating to %g' % (img_size, s, new_size))
-    return new_size
+    new_h = make_divisible(img_shape[0], int(s))  # ceil gs-multiple
+    new_w = make_divisible(img_shape[1], int(s))  # ceil gs-multiple
+    new_shape = (new_h, new_w, *img_shape[2:])
+    if new_h != img_shape[0] or new_w != img_shape[1]:
+        print('WARNING: --img-shape %g must be multiple of max stride %g, updating to %g' % (new_shape, s, img_shape))
+    return new_shape
 
 
 def check_imshow():
@@ -253,7 +257,7 @@ def labels_to_class_weights(labels, nc=80):
         return torch.Tensor()
 
     labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO
-    classes = labels[:, 0].astype(np.int)  # labels = [class xywh]
+    classes = labels[:, 0].astype(int)  # labels = [class xywh]
     weights = np.bincount(classes, minlength=nc)  # occurrences per class
 
     # Prepend gridpoint count (for uCE training)
@@ -268,7 +272,7 @@ def labels_to_class_weights(labels, nc=80):
 
 def labels_to_image_weights(labels, nc=80, class_weights=np.ones(80)):
     # Produces image weights based on class_weights and image contents
-    class_counts = np.array([np.bincount(x[:, 0].astype(np.int), minlength=nc) for x in labels])
+    class_counts = np.array([np.bincount(x[:, 0].astype(int), minlength=nc) for x in labels])
     image_weights = (class_weights.reshape(1, nc) * class_counts).sum(1)
     # index = random.choices(range(n), weights=image_weights, k=1)  # weight image sample
     return image_weights

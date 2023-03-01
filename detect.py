@@ -11,14 +11,14 @@ from numpy import random
 
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
-from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
+from utils.general import check_img_shape, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, save_one_box
 from utils.plots import colors, plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized
 
 
 def detect(opt):
-    source, weights, view_img, save_txt, imgsz, save_txt_tidl, kpt_label = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, opt.save_txt_tidl, opt.kpt_label
+    source, weights, view_img, save_txt, img_shape, save_txt_tidl, kpt_label = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, opt.save_txt_tidl, opt.kpt_label
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
@@ -35,12 +35,7 @@ def detect(opt):
     # Load model
     model = attempt_load(weights, map_location=device)  # load FP32 model
     stride = int(model.stride.max())  # model stride
-    if isinstance(imgsz, (list,tuple)):
-        assert len(imgsz) ==2; "height and width of image has to be specified"
-        imgsz[0] = check_img_size(imgsz[0], s=stride)
-        imgsz[1] = check_img_size(imgsz[1], s=stride)
-    else:
-        imgsz = check_img_size(imgsz, s=stride)  # check img_size
+    img_shape = check_img_shape(img_shape, s=stride)  # check img_size
     names = model.module.names if hasattr(model, 'module') else model.names  # get class names
     if half:
         model.half()  # to FP16
@@ -56,13 +51,13 @@ def detect(opt):
     if webcam:
         view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride)
+        dataset = LoadStreams(source, img_shape=img_shape, stride=stride)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride)
+        dataset = LoadImages(source, img_shape=img_shape, stride=stride)
 
     # Run inference
     if device.type != 'cpu':
-        model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+        model(torch.zeros(1, 3, *img_shape[:2]).to(device).type_as(next(model.parameters())))  # run once
     t0 = time.time()
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)

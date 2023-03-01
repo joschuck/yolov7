@@ -20,7 +20,7 @@ import numpy as np
 import models
 from models.experimental import attempt_load
 from utils.activations import Hardswish, SiLU
-from utils.general import colorstr, check_img_size, check_requirements, file_size, set_logging
+from utils.general import colorstr, check_img_shape, check_requirements, file_size, set_logging
 from utils.torch_utils import select_device
 
 if __name__ == '__main__':
@@ -46,7 +46,8 @@ if __name__ == '__main__':
 
     # Checks
     gs = int(max(model.stride))  # grid size (max stride)
-    opt.img_size = [check_img_size(x, gs) for x in opt.img_size]  # verify img_size are gs-multiples
+    # todo broken
+    opt.img_size = [check_img_shape(x, gs) for x in opt.img_size]  # verify img_size are gs-multiples
 
     # Input
     img = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)  # image size(1,3,320,192) iDetection

@@ -196,9 +196,9 @@ class WandbLogger():
         nc, names = (1, ['item']) if single_cls else (int(data['nc']), data['names'])
         names = {k: v for k, v in enumerate(names)}  # to index dictionary
         self.train_artifact = self.create_dataset_table(LoadImagesAndLabels(
-            data['train'], rect=True, batch_size=1), names, name='train') if data.get('train') else None
+            data['train'], batch_size=1), names, name='train') if data.get('train') else None
         self.val_artifact = self.create_dataset_table(LoadImagesAndLabels(
-            data['val'], rect=True, batch_size=1), names, name='val') if data.get('val') else None
+            data['val'], batch_size=1), names, name='val') if data.get('val') else None
         if data.get('train'):
             data['train'] = WANDB_ARTIFACT_PREFIX + str(Path(project) / 'train')
         if data.get('val'):
