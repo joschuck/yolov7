@@ -1,6 +1,7 @@
 import argparse
 import sys
 import time
+import traceback
 import warnings
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
@@ -22,6 +23,7 @@ if __name__ == '__main__':
     parser.add_argument('-w', '--weights', type=str, help='weights path')
     parser.add_argument('-shape', '--img-shape', nargs='+', type=int, default=[640, 640, 3], help='image shape (h, w, ch)')
     parser.add_argument('-bs', '--batch-size', type=int, default=1, help='batch size')
+    parser.add_argument('-o', "--output-filename", type=str, default="", help='output file name')
     parser.add_argument('--dynamic', action='store_true', help='dynamic ONNX axes')
     parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
     parser.add_argument('--grid', action='store_true', help='export Detect() layer grid')
@@ -93,7 +95,7 @@ if __name__ == '__main__':
 
         print('\nStarting CoreML export with coremltools %s...' % ct.__version__)
         # convert model from torchscript and apply pixel scaling as per detect.py
-        ct_model = ct.convert(ts, inputs=[ct.ImageType('image', shape=img.shape, scale=1 / 255.0, bias=[0, 0, 0])])
+        ct_model = ct.convert(ts, inputs=[ct.ImageType('image', shape=img.shape, scale=1 / 255.0, bias=[0])])
         bits, mode = (8, 'kmeans_lut') if opt.int8 else (16, 'linear') if opt.fp16 else (32, None)
         if bits < 32:
             if sys.platform.lower() == 'darwin':  # quantization only supported on macOS
@@ -107,8 +109,9 @@ if __name__ == '__main__':
         ct_model.save(f)
         print('CoreML export success, saved as %s' % f)
     except Exception as e:
+        traceback.print_exc()
         print('CoreML export failure: %s' % e)
-
+    
     # TorchScript-Lite export
     try:
         print('\nStarting TorchScript-Lite export with torch %s...' % torch.__version__)
@@ -126,7 +129,7 @@ if __name__ == '__main__':
         import onnx
 
         print('\nStarting ONNX export with onnx %s...' % onnx.__version__)
-        f = opt.weights.replace('.pt', '.onnx')  # filename
+        onnx_filename = opt.output_filename if opt.output_filename else opt.weights.replace('.pt', '.onnx')
         model.eval()
         output_names = ['classes', 'boxes'] if y is None else ['output']
         dynamic_axes = None
@@ -165,12 +168,12 @@ if __name__ == '__main__':
             else:
                 model.model[-1].concat = True
 
-        torch.onnx.export(model, img, f, verbose=False, opset_version=12, input_names=['images'],
+        torch.onnx.export(model, img, onnx_filename, verbose=False, opset_version=12, input_names=['images'],
                           output_names=output_names,
                           dynamic_axes=dynamic_axes)
 
         # Checks
-        onnx_model = onnx.load(f)  # load onnx model
+        onnx_model = onnx.load(onnx_filename)  # load onnx model
         onnx.checker.check_model(onnx_model)  # check onnx model
 
         if opt.end2end and opt.max_wh is None:
@@ -198,16 +201,17 @@ if __name__ == '__main__':
                 print(f'Simplifier failure: {e}')
 
         # print(onnx.helper.printable_graph(onnx_model.graph))  # print a human readable model
-        onnx.save(onnx_model, f)
-        print('ONNX export success, saved as %s' % f)
+        onnx.save(onnx_model, onnx_filename)
+        print('ONNX export success, saved as %s' % onnx_filename)
 
         if opt.include_nms:
             print('Registering NMS plugin for ONNX...')
-            mo = RegisterNMS(f)
+            mo = RegisterNMS(onnx_filename)
             mo.register_nms()
-            mo.save(f)
+            mo.save(onnx_filename)
 
     except Exception as e:
+        traceback.print_exc()
         print('ONNX export failure: %s' % e)
 
     # Finish

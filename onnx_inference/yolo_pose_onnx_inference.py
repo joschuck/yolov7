@@ -5,12 +5,11 @@ import argparse
 import onnxruntime
 from tqdm import tqdm
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--model-path", type=str, default="./yolov5s6_pose_640_ti_lite_54p9_82p2.onnx")
-parser.add_argument("--img-path", type=str, default="./sample_ips.txt")
-parser.add_argument("--dst-path", type=str, default="./sample_ops_onnxrt")
-args = parser.parse_args()
+from pathlib import Path
+from typing import List, Union, Tuple
 
+# Define a list of supported image file formats
+IMAGE_FORMATS: List[str] = ['.bmp', '.pbm', '.pgm', '.ppm', '.sr', '.ras', '.jpeg', '.jpg', '.jpe', '.jp2', '.tiff', '.tif', '.png', '.exr']
 
 _CLASS_COLOR_MAP = [
     (0, 0, 255) , # Person (blue).
@@ -37,13 +36,49 @@ pose_limb_color = palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 1
 pose_kpt_color = palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
 radius = 5
 
-def read_img(img_file, img_mean=127.5, img_scale=1/127.5):
-    img = cv2.imread(img_file)[:, :, ::-1]
-    img = cv2.resize(img, (640,640), interpolation=cv2.INTER_LINEAR)
+def get_image_files(directory_path: Union[Path, str]) -> List[str]:
+    """
+    Get a list of image file paths from the specified directory.
+
+    Parameters
+    ----------
+    directory_path : Union[Path, str]
+        The directory path to search for image files.
+
+    Returns
+    -------
+    List[str]
+        A list of image file paths that meet the required criteria.
+    """
+    image_files: List[str] = []
+
+    for file_path in Path(directory_path).iterdir():
+        # Check if the file is a regular file (i.e. not a directory) and has a supported file extension
+        if file_path.is_file() and file_path.suffix.lower() in IMAGE_FORMATS:
+            # Append the file path to the list of image filenames
+            image_files.append(str(file_path))
+
+    return image_files
+
+def read_img(img_file, img_shape):
+    h, w, ch = img_shape
+    img = cv2.imread(img_file, cv2.IMREAD_COLOR if ch > 1 else cv2.IMREAD_GRAYSCALE)
+    return img
+
+def prepare_input(img, img_shape, img_mean=127.5, img_scale=1/127.5):
+    h, w, ch = img_shape
+    img = cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    if ch == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    if ch == 1:
+        img = np.reshape(img, img_shape)
+
     img = (img - img_mean) * img_scale
     img = np.asarray(img, dtype=np.float32)
-    img = np.expand_dims(img,0)
-    img = img.transpose(0,3,1,2)
+    img = np.expand_dims(img, 0)
+    img = img.transpose(0, 3, 1, 2)
     return img
 
 
@@ -55,17 +90,16 @@ def model_inference(model_path=None, input=None):
     return output
 
 
-def model_inference_image_list(model_path, img_path=None, mean=None, scale=None, dst_path=None):
+def model_inference_image_list(model_path: str, img_path: str, img_shape: Tuple[int, int, int], mean=None, scale=None, dst_path=None):
     os.makedirs(args.dst_path, exist_ok=True)
-    img_file_list = list(open(img_path))
-    pbar = enumerate(img_file_list)
-    max_index = 20
-    pbar = tqdm(pbar, total=min(len(img_file_list), max_index))
-    for img_index, img_file  in pbar:
+    img_file_list = get_image_files(img_path)
+
+    pbar = tqdm(enumerate(img_file_list), total=min(len(img_file_list), 10))
+    for img_index, img_file in pbar:
         pbar.set_description("{}/{}".format(img_index, len(img_file_list)))
-        img_file = img_file.rstrip()
-        input = read_img(img_file, mean, scale)
-        output = model_inference(model_path, input)
+        img = read_img(img_file, img_shape)
+        _input = prepare_input(img, img_shape, mean, scale)
+        output = model_inference(model_path, _input)
         dst_file = os.path.join(dst_path, os.path.basename(img_file))
         post_process(img_file, dst_file, output[0], score_threshold=0.3)
 
@@ -93,7 +127,7 @@ def post_process(img_file, dst_file, output, score_threshold=0.3):
     cv2.imwrite(dst_file, img)
     f.close()
 
-
+# TODO use from plot.py
 def plot_skeleton_kpts(im, kpts, steps=3):
     num_kpts = len(kpts) // steps
     #plot keypoints
@@ -114,10 +148,19 @@ def plot_skeleton_kpts(im, kpts, steps=3):
             cv2.line(im, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
 
 
-def main():
-    model_inference_image_list(model_path=args.model_path, img_path=args.img_path,
-                               mean=0.0, scale=0.00392156862745098,
-                               dst_path=args.dst_path)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m", "--model-path", type=str)
+    parser.add_argument("-i", "--img-path", type=str, default="./sample_ips.txt")
+    parser.add_argument("-d", "--dst-path", type=str, default="./sample_ops_onnxrt")
+    parser.add_argument('-s', '--img-shape', nargs=3, type=int, default=[640, 640, 3], help='image shape (h, w, ch)')
+    args = parser.parse_args()
 
-if __name__== "__main__":
-    main()
+    model_inference_image_list(
+        args.model_path,
+        args.img_path,
+        args.img_shape,
+        mean=0.0,
+        scale=0.00392156862745098,
+        dst_path=args.dst_path
+    )

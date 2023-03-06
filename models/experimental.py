@@ -199,9 +199,9 @@ class ONNX_ORT(nn.Module):
         self.n_classes=n_classes
 
     def forward(self, x):
-        boxes = x[:, :, :4]
-        conf = x[:, :, 4:5]
-        scores = x[:, :, 5:]
+        boxes = x[0][:, :, :4]
+        conf = x[0][:, :, 4:5]
+        scores = x[0][:, :, 5:]
         if self.n_classes == 1:
             scores = conf # for models with one class, cls_loss is 0 and cls_conf is always 0.5,
                                  # so there is no need to multiplicate.
