@@ -3,10 +3,13 @@ import numpy as np
 import cv2
 import argparse
 import onnxruntime
+import yaml
 from tqdm import tqdm
 
 from pathlib import Path
 from typing import List, Union, Tuple
+
+from utils.plots import plot_skeleton_kpts
 
 # Define a list of supported image file formats
 IMAGE_FORMATS: List[str] = ['.bmp', '.pbm', '.pgm', '.ppm', '.sr', '.ras', '.jpeg', '.jpg', '.jpe', '.jp2', '.tiff', '.tif', '.png', '.exr']
@@ -90,7 +93,7 @@ def model_inference(model_path=None, input=None):
     return output
 
 
-def model_inference_image_list(model_path: str, img_path: str, img_shape: Tuple[int, int, int], mean=None, scale=None, dst_path=None):
+def model_inference_image_list(model_path: str, data_dict, img_path: str, img_shape: Tuple[int, int, int], mean=None, scale=None, dst_path=None):
     os.makedirs(args.dst_path, exist_ok=True)
     img_file_list = get_image_files(img_path)
 
@@ -101,12 +104,12 @@ def model_inference_image_list(model_path: str, img_path: str, img_shape: Tuple[
         _input = prepare_input(img, img_shape, mean, scale)
         output = model_inference(model_path, _input)
         dst_file = os.path.join(dst_path, os.path.basename(img_file))
-        post_process(img_file, dst_file, output[0], score_threshold=0.3)
+        post_process(img_file, dst_file, output[0][0], data_dict["skeleton"])
 
 
-def post_process(img_file, dst_file, output, score_threshold=0.3):
+def post_process(img_file, dst_file, output, skeleton, score_threshold=0.45):
     """
-    Draw bounding boxes on the input image. Dump boxes in a txt file.
+    Draw bounding boxes on the input image. Dump boxes  in a txt file.
     """
     det_bboxes, det_scores, det_labels, kpts = output[:, 0:4], output[:, 4], output[:, 5], output[:, 6:]
     img = cv2.imread(img_file)
@@ -120,44 +123,32 @@ def post_process(img_file, dst_file, output, score_threshold=0.3):
             f.write("{:8.0f} {:8.5f} {:8.5f} {:8.5f} {:8.5f} {:8.5f}\n".format(det_labels[idx], det_scores[idx], det_bbox[1], det_bbox[0], det_bbox[3], det_bbox[2]))
         if det_scores[idx]>score_threshold:
             color_map = _CLASS_COLOR_MAP[int(det_labels[idx])]
-            img = cv2.rectangle(img, (det_bbox[0], det_bbox[1]), (det_bbox[2], det_bbox[3]), color_map[::-1], 2)
-            cv2.putText(img, "id:{}".format(int(det_labels[idx])), (int(det_bbox[0]+5),int(det_bbox[1])+15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_map[::-1], 2)
-            cv2.putText(img, "score:{:2.1f}".format(det_scores[idx]), (int(det_bbox[0] + 5), int(det_bbox[1]) + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_map[::-1], 2)
-            plot_skeleton_kpts(img, kpt)
+
+            x, y = (int(det_bbox[0]), int(det_bbox[1]))
+            w, h = (int(det_bbox[2]), int(det_bbox[3]))
+            img = cv2.rectangle(img, (x, y), (w, h), color_map[::-1], 2)
+            cv2.putText(img, "id:{}".format(int(det_labels[idx])), (x + 5, y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_map[::-1], 2)
+            cv2.putText(img, "score:{:2.1f}".format(det_scores[idx]), (x + 5, y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_map[::-1], 2)
+            plot_skeleton_kpts(img, img.shape, kpt, 3, skeleton)
     cv2.imwrite(dst_file, img)
     f.close()
-
-# TODO use from plot.py
-def plot_skeleton_kpts(im, kpts, steps=3):
-    num_kpts = len(kpts) // steps
-    #plot keypoints
-    for kid in range(num_kpts):
-        r, g, b = pose_kpt_color[kid]
-        x_coord, y_coord = kpts[steps * kid], kpts[steps * kid + 1]
-        conf = kpts[steps * kid + 2]
-        if conf > 0.5: #Confidence of a keypoint has to be greater than 0.5
-            cv2.circle(im, (int(x_coord), int(y_coord)), radius, (int(r), int(g), int(b)), -1)
-    #plot skeleton
-    for sk_id, sk in enumerate(skeleton):
-        r, g, b = pose_limb_color[sk_id]
-        pos1 = (int(kpts[(sk[0]-1)*steps]), int(kpts[(sk[0]-1)*steps+1]))
-        pos2 = (int(kpts[(sk[1]-1)*steps]), int(kpts[(sk[1]-1)*steps+1]))
-        conf1 = kpts[(sk[0]-1)*steps+2]
-        conf2 = kpts[(sk[1]-1)*steps+2]
-        if conf1>0.5 and conf2>0.5: # For a limb, both the keypoint confidence must be greater than 0.5
-            cv2.line(im, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-m", "--model-path", type=str)
+    parser.add_argument('--data', type=str, default='data/coco128.yaml', help='data.yaml path')
     parser.add_argument("-i", "--img-path", type=str, default="./sample_ips.txt")
     parser.add_argument("-d", "--dst-path", type=str, default="./sample_ops_onnxrt")
     parser.add_argument('-s', '--img-shape', nargs=3, type=int, default=[640, 640, 3], help='image shape (h, w, ch)')
     args = parser.parse_args()
 
+    with open(args.data) as f:
+        data_dict = yaml.safe_load(f)  # data dict
+
     model_inference_image_list(
         args.model_path,
+        data_dict,
         args.img_path,
         args.img_shape,
         mean=0.0,
