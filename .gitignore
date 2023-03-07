@@ -166,3 +166,4 @@ cython_debug/
 /weights/
 /amp_kpts/
 /onnx/
+/sample_ops_onnxrt/
