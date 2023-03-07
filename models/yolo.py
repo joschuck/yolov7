@@ -279,7 +279,7 @@ class IKeypoint(nn.Module):
                 x_kpt[..., 1::3] = (x_kpt[..., 1::3] * 2. - 0.5 + kpt_grid_y.repeat(1,1,1,1,self.nkpt)) * self.stride[i]  # xy
                 x_kpt[..., 2::3] = x_kpt[..., 2::3].sigmoid()
 
-                y = torch.cat((xy, wh, y[..., 4:], x_kpt), dim = -1)
+                y = torch.cat((xy, wh, y[..., 4:], x_kpt), dim=-1)
 
                 z.append(y.view(bs, -1, self.no))
 
@@ -583,7 +583,7 @@ class Model(nn.Module):
 
     def forward_once(self, x, profile=False):
         y, dt = [], []  # outputs
-        for m in self.model:
+        for i, m in enumerate(self.model):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
@@ -726,24 +726,45 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 pass
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, DWConv, MixConv2d, Focus, ConvFocus, CrossConv, BottleneckCSP,
-                 C3, C3TR, BottleneckCSPF, BottleneckCSP2, SPPCSP, SPPCSPC]:
+        if m in [nn.Conv2d, Conv, RobustConv, RobustConv2, DWConv, GhostConv, RepConv, RepConv_OREPA, DownC,
+                 SPP, SPPF, SPPCSPC, GhostSPPCSPC, MixConv2d, Focus, Stem, GhostStem, CrossConv,
+                 Bottleneck, BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
+                 RepBottleneck, RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
+                 Res, ResCSPA, ResCSPB, ResCSPC,
+                 RepRes, RepResCSPA, RepResCSPB, RepResCSPC,
+                 ResX, ResXCSPA, ResXCSPB, ResXCSPC,
+                 RepResX, RepResXCSPA, RepResXCSPB, RepResXCSPC,
+                 Ghost, GhostCSPA, GhostCSPB, GhostCSPC,
+                 SwinTransformerBlock, STCSPA, STCSPB, STCSPC,
+                 SwinTransformer2Block, ST2CSPA, ST2CSPB, ST2CSPC]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8)
 
             args = [c1, c2, *args[1:]]
-            if m in [BottleneckCSP, C3, C3TR, BottleneckCSPF, BottleneckCSP2, SPPCSP, SPPCSPC]:
+            if m in [DownC, SPPCSPC, GhostSPPCSPC,
+                     BottleneckCSPA, BottleneckCSPB, BottleneckCSPC,
+                     RepBottleneckCSPA, RepBottleneckCSPB, RepBottleneckCSPC,
+                     ResCSPA, ResCSPB, ResCSPC,
+                     RepResCSPA, RepResCSPB, RepResCSPC,
+                     ResXCSPA, ResXCSPB, ResXCSPC,
+                     RepResXCSPA, RepResXCSPB, RepResXCSPC,
+                     GhostCSPA, GhostCSPB, GhostCSPC,
+                     STCSPA, STCSPB, STCSPC,
+                     ST2CSPA, ST2CSPB, ST2CSPC]:
                 args.insert(2, n)  # number of repeats
                 n = 1
-            if m in [Conv, GhostConv, Bottleneck, GhostBottleneck, DWConv, MixConv2d, Focus, ConvFocus, CrossConv, BottleneckCSP, C3, C3TR]:
-                if 'act' in d.keys():
-                    args_dict = {"act" : d['act']}
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
             c2 = sum([ch[x] for x in f])
-        elif m in [Detect, IDetect, IKeypoint]:
+        elif m is Chuncat:
+            c2 = sum([ch[x] for x in f])
+        elif m is Shortcut:
+            c2 = ch[f[0]]
+        elif m is Foldcut:
+            c2 = ch[f] // 2
+        elif m in [Detect, IDetect, IAuxDetect, IBin, IKeypoint]:
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)

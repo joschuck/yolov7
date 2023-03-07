@@ -16,6 +16,7 @@ import seaborn as sns
 import torch
 import yaml
 from PIL import Image, ImageDraw, ImageFont
+from scipy.signal import butter, filtfilt
 
 from utils.general import xywh2xyxy, xyxy2xywh
 from utils.metrics import fitness
@@ -25,22 +26,12 @@ matplotlib.rc('font', **{'size': 11})
 matplotlib.use('Agg')  # for writing to files only
 
 
-class Colors:
-    # Ultralytics color palette https://ultralytics.com/
-    def __init__(self):
-        self.palette = [self.hex2rgb(c) for c in matplotlib.colors.TABLEAU_COLORS.values()]
-        self.n = len(self.palette)
-
-    def __call__(self, i, bgr=False):
-        c = self.palette[int(i) % self.n]
-        return (c[2], c[1], c[0]) if bgr else c
-
-    @staticmethod
-    def hex2rgb(h):  # rgb order (PIL)
+def color_list():
+    # Return first 10 plt colors as (r,g,b) https://stackoverflow.com/questions/51350872/python-from-color-name-to-rgb
+    def hex2rgb(h):
         return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
 
-
-colors = Colors()  # create instance for 'from utils.plots import colors'
+    return [hex2rgb(h) for h in matplotlib.colors.TABLEAU_COLORS.values()]  # or BASE_ (8), CSS4_ (148), XKCD_ (949)
 
 
 def hist2d(x, y, n=100):
@@ -53,8 +44,6 @@ def hist2d(x, y, n=100):
 
 
 def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
-    from scipy.signal import butter, filtfilt
-
     # https://stackoverflow.com/questions/28536191/how-to-filter-smooth-with-scipy-numpy
     def butter_lowpass(cutoff, fs, order):
         nyq = 0.5 * fs
@@ -84,60 +73,19 @@ def plot_one_box(x, im, orig_shape, color=None, label=None, line_thickness=3, nk
         plot_skeleton_kpts(im, orig_shape, kpts, steps, skeleton)
 
 
-def plot_skeleton_kpts(im, shape, kpts, steps, skeleton):
-    #Plot the skeleton and keypointsfor coco datatset
-    palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102],
-                        [230, 230, 0], [255, 153, 255], [153, 204, 255],
-                        [255, 102, 255], [255, 51, 255], [102, 178, 255],
-                        [51, 153, 255], [255, 153, 153], [255, 102, 102],
-                        [255, 51, 51], [153, 255, 153], [102, 255, 102],
-                        [51, 255, 51], [0, 255, 0], [0, 0, 255], [255, 0, 0],
-                        [255, 255, 255]])
 
-    pose_limb_color = palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
-    pose_kpt_color = palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
-    radius = 3
-    num_kpts = len(kpts) // steps
-
-    for kid in range(num_kpts):
-        r, g, b = pose_kpt_color[kid]
-        x_coord, y_coord = kpts[steps * kid], kpts[steps * kid + 1]
-        if not (x_coord % shape[1] == 0 or y_coord % shape[0] == 0):
-            if steps == 3:
-                conf = kpts[steps * kid + 2]
-                if conf < 0.5:
-                    continue
-            cv2.circle(im, (int(x_coord), int(y_coord)), radius, (int(r), int(g), int(b)), -1)
-
-    for sk_id, sk in enumerate(skeleton):
-        r, g, b = pose_limb_color[sk_id]
-        pos1 = (int(kpts[(sk[0]-1)*steps]), int(kpts[(sk[0]-1)*steps+1]))
-        pos2 = (int(kpts[(sk[1]-1)*steps]), int(kpts[(sk[1]-1)*steps+1]))
-        if steps == 3:
-            conf1 = kpts[(sk[0]-1)*steps+2]
-            conf2 = kpts[(sk[1]-1)*steps+2]
-            if conf1<0.5 or conf2<0.5:
-                continue
-        if pos1[0] % shape[1] == 0 or pos1[1] % shape[0] == 0 or pos1[0] < 0 or pos1[1] < 0:
-            continue
-        if pos2[0] % shape[1] == 0 or pos2[1] % shape[0] == 0 or pos2[0] < 0 or pos2[1] < 0:
-            continue
-        cv2.line(im, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
-
-
-def plot_one_box_PIL(box, im, color=None, label=None, line_thickness=None):
-    # Plots one bounding box on image 'im' using PIL
-    im = Image.fromarray(im)
-    draw = ImageDraw.Draw(im)
-    line_thickness = line_thickness or max(int(min(im.size) / 200), 2)
+def plot_one_box_PIL(box, img, color=None, label=None, line_thickness=None):
+    img = Image.fromarray(img)
+    draw = ImageDraw.Draw(img)
+    line_thickness = line_thickness or max(int(min(img.size) / 200), 2)
     draw.rectangle(box, width=line_thickness, outline=tuple(color))  # plot
     if label:
-        fontsize = max(round(max(im.size) / 40), 12)
+        fontsize = max(round(max(img.size) / 40), 12)
         font = ImageFont.truetype("Arial.ttf", fontsize)
         txt_width, txt_height = font.getsize(label)
-        #draw.rectangle([box[0], box[1] - txt_height + 4, box[0] + txt_width, box[1]], fill=tuple(color))
+        draw.rectangle([box[0], box[1] - txt_height + 4, box[0] + txt_width, box[1]], fill=tuple(color))
         draw.text((box[0], box[1] - txt_height + 1), label, fill=(255, 255, 255), font=font)
-    return np.asarray(im)
+    return np.asarray(img)
 
 
 def plot_wh_methods():  # from utils.plots import *; plot_wh_methods()
@@ -149,8 +97,8 @@ def plot_wh_methods():  # from utils.plots import *; plot_wh_methods()
 
     fig = plt.figure(figsize=(6, 3), tight_layout=True)
     plt.plot(x, ya, '.-', label='YOLOv3')
-    plt.plot(x, yb ** 2, '.-', label='YOLOv5 ^2')
-    plt.plot(x, yb ** 1.6, '.-', label='YOLOv5 ^1.6')
+    plt.plot(x, yb ** 2, '.-', label='YOLOR ^2')
+    plt.plot(x, yb ** 1.6, '.-', label='YOLOR ^1.6')
     plt.xlim(left=-4, right=4)
     plt.ylim(bottom=0, top=6)
     plt.xlabel('input')
@@ -182,7 +130,6 @@ def plot_images(
     nkpt=17,
     skeleton=None,
     steps=2,
-    orig_shape=None
 ):
     # Plot image grid with labels
 
@@ -208,6 +155,7 @@ def plot_images(
     h = math.ceil(scale_factor_h * h)
     w = math.ceil(scale_factor_w * w)
 
+    colors = color_list()  # list of colors
     mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)
     for i, img in enumerate(images):
         if i == max_subplots:  # if last batch has fewer images than we expect
@@ -217,8 +165,8 @@ def plot_images(
         block_y = int(h * (i % ns))
 
         img = img.transpose(1, 2, 0)
-        img = np.repeat(img, 3, axis=-1)
-        # img = np.stack((img,) * 3, axis=-1)
+        if shape[2] == 1:
+            img = np.repeat(img, 3, axis=-1)
         img = cv2.resize(img, (w, h))
 
         mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
@@ -257,7 +205,7 @@ def plot_images(
 
             for j, box in enumerate(boxes.T):
                 cls = int(classes[j])
-                color = colors(cls)
+                color = colors[cls % len(colors)]
                 cls = names[cls] if names else cls
                 if labels or conf[j] > 0.1:  # 0.25 conf thresh
                     label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
@@ -265,14 +213,12 @@ def plot_images(
                         plot_one_box(box, mosaic, shape, label=label, color=color, line_thickness=tl, nkpt=nkpt, kpts=kpts[:,j], steps=steps, skeleton=skeleton)
                     else:
                         plot_one_box(box, mosaic, shape, label=label, color=color, line_thickness=tl, nkpt=nkpt)
-                    #cv2.imwrite(Path(paths[i]).name.split('.')[0] + "_box_{}.".format(j) + Path(paths[i]).name.split('.')[1], mosaic[:,:,::-1]) # used for debugging the dataloader pipeline
 
         # Draw image filename labels
         if paths:
             label = Path(paths[i]).name[:40]  # trim to 40 char
-            t_size = cv2.getTextSize(label, 0, fontScale=tl / 6, thickness=tf)[0]
-
-            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 6, [220, 220, 220], thickness=tf,
+            t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness=tf,
                         lineType=cv2.LINE_AA)
 
         # Image border
@@ -281,10 +227,7 @@ def plot_images(
     if fname:
         r = min(1280. / max(h, w) / ns, 1.0)  # ratio to limit image size
         mosaic = cv2.resize(mosaic, (int(ns * w * r), int(ns * h * r)), interpolation=cv2.INTER_AREA)
-        #padH = int(orig_shape[1][1][1])
-        #padW = int(orig_shape[1][1][0])
-        #mosaic = mosaic[padH: -1-padH, padW:-1-padW,:]
-        #cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))  # cv2 save
+        # cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))  # cv2 save
         Image.fromarray(mosaic).save(fname)  # PIL save
     return mosaic
 
@@ -342,7 +285,7 @@ def plot_study_txt(path='', x=None):  # from utils.plots import *; plot_study_tx
     # ax = ax.ravel()
 
     fig2, ax2 = plt.subplots(1, 1, figsize=(8, 4), tight_layout=True)
-    # for f in [Path(path) / f'study_coco_{x}.txt' for x in ['yolov5s6', 'yolov5m6', 'yolov5l6', 'yolov5x6']]:
+    # for f in [Path(path) / f'study_coco_{x}.txt' for x in ['yolor-p6', 'yolor-w6', 'yolor-e6', 'yolor-d6']]:
     for f in sorted(Path(path).glob('study*.txt')):
         y = np.loadtxt(f, dtype=np.float32, usecols=[0, 1, 2, 3, 7, 8, 9], ndmin=2).T
         x = np.arange(y.shape[1]) if x is None else np.array(x)
@@ -367,12 +310,13 @@ def plot_study_txt(path='', x=None):  # from utils.plots import *; plot_study_tx
     ax2.legend(loc='lower right')
     plt.savefig(str(Path(path).name) + '.png', dpi=300)
 
-
+# TODO: this method needs to switch between keypoint and class format
 def plot_labels(labels, names=(), save_dir=Path(''), loggers=None):
     # plot dataset labels
     print('Plotting labels... ')
     c, b, kpts = labels[:, 0], labels[:, 1:5].transpose(), labels[:, 5:].transpose()  # classes, boxes
     nc = int(c.max() + 1)  # number of classes
+    colors = color_list()
     x = pd.DataFrame(b.transpose(), columns=['x', 'y', 'width', 'height'])
 
     # seaborn correlogram
@@ -398,7 +342,7 @@ def plot_labels(labels, names=(), save_dir=Path(''), loggers=None):
     labels[:, 1:] = xywh2xyxy(labels[:, 1:]) * 2000
     img = Image.fromarray(np.ones((2000, 2000, 3), dtype=np.uint8) * 255)
     for cls, *box in labels[:1000, :5]:
-        ImageDraw.Draw(img).rectangle(box, width=1, outline=colors(cls))  # plot
+        ImageDraw.Draw(img).rectangle(box, width=1, outline=colors[int(cls) % 10])  # plot
     ax[1].imshow(img)
     ax[1].axis('off')
 
@@ -419,7 +363,7 @@ def plot_labels(labels, names=(), save_dir=Path(''), loggers=None):
 def plot_evolution(yaml_file='data/hyp.finetune.yaml'):  # from utils.plots import *; plot_evolution()
     # Plot hyperparameter evolution results in evolve.txt
     with open(yaml_file) as f:
-        hyp = yaml.safe_load(f)
+        hyp = yaml.load(f, Loader=yaml.SafeLoader)
     x = np.loadtxt('evolve.txt', ndmin=2)
     f = fitness(x)
     # weights = (f - f.min()) ** 2  # for weighted results
@@ -529,3 +473,43 @@ def plot_results(start=0, stop=0, bucket='', id=(), labels=(), save_dir=''):
 
     ax[1].legend()
     fig.savefig(Path(save_dir) / 'results.png', dpi=200)
+
+
+def plot_skeleton_kpts(im, shape, kpts, steps, skeleton, conf: float = .3):
+    #Plot the skeleton and keypointsfor coco datatset
+    palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102],
+                        [230, 230, 0], [255, 153, 255], [153, 204, 255],
+                        [255, 102, 255], [255, 51, 255], [102, 178, 255],
+                        [51, 153, 255], [255, 153, 153], [255, 102, 102],
+                        [255, 51, 51], [153, 255, 153], [102, 255, 102],
+                        [51, 255, 51], [0, 255, 0], [0, 0, 255], [255, 0, 0],
+                        [255, 255, 255]])
+
+    pose_limb_color = palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
+    pose_kpt_color = palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
+    radius = 3
+    num_kpts = len(kpts) // steps
+
+    for kid in range(num_kpts):
+        r, g, b = pose_kpt_color[kid]
+        x_coord, y_coord = kpts[steps * kid], kpts[steps * kid + 1]
+        if not (x_coord % shape[1] == 0 or y_coord % shape[0] == 0):
+            if steps == 3:
+                if kpts[steps * kid + 2] < conf:
+                    continue
+            cv2.circle(im, (int(x_coord), int(y_coord)), radius, (int(r), int(g), int(b)), -1)
+
+    for sk_id, sk in enumerate(skeleton):
+        r, g, b = pose_limb_color[sk_id]
+        pos1 = (int(kpts[(sk[0]-1)*steps]), int(kpts[(sk[0]-1)*steps+1]))
+        pos2 = (int(kpts[(sk[1]-1)*steps]), int(kpts[(sk[1]-1)*steps+1]))
+        if steps == 3:
+            conf1 = kpts[(sk[0]-1)*steps+2]
+            conf2 = kpts[(sk[1]-1)*steps+2]
+            if conf1 < conf or conf2 < conf:
+                continue
+        if pos1[0] % shape[1] == 0 or pos1[1] % shape[0] == 0 or pos1[0] < 0 or pos1[1] < 0:
+            continue
+        if pos2[0] % shape[1] == 0 or pos2[1] % shape[0] == 0 or pos2[0] < 0 or pos2[1] < 0:
+            continue
+        cv2.line(im, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
