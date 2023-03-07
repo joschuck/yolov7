@@ -103,7 +103,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
         model.load_state_dict(state_dict, strict=False)  # load
         logger.info('Transferred %g/%g items from %s' % (len(state_dict), len(model.state_dict()), weights))  # report
     else:
-        model = Model(opt.cfg, ch=ch, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+        model = Model(opt.cfg, ch=ch, nc=nc, anchors=hyp.get('anchors'), shape=img_shapes[0][:2]).to(device)  # create
     with torch_distributed_zero_first(rank):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
@@ -358,7 +358,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
                     '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
-                if plots:# and ni < 33:  # TODO what is the meaning of this?
+                if plots and i < 3:  # 3 images per epoch
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
                     result = plot_images(imgs, targets, paths, f, skeleton=data_dict['skeleton'], nkpt=nkpt, shape=img_shape)
                     if tb_writer:
