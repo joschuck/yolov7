@@ -191,7 +191,11 @@ class LoadImages:  # for inference
         img = letterbox(img0, self.img_shape[:2], stride=self.stride, auto=False)[0]
 
         # Convert
-        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+        if self.img_shape[2] == 3:
+            img = img[:, :, ::-1]  # BGR to RGB
+        else:
+            img = np.reshape(img, (*img.shape, 1))
+        img = img[:, :, :].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
 
         return path, img, img0, self.cap
