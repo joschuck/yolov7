@@ -105,7 +105,10 @@ def detect():
             if webcam:  # batch_size >= 1
                 p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
             else:
-                p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
+                p, s, im0, frame = path, '', im0s.copy(), getattr(dataset, 'frame', 0)
+
+            if img_shape[2] == 1:
+                im0 = cv2.cvtColor(im0, cv2.COLOR_GRAY2RGB)
 
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)  # img.jpg
@@ -113,8 +116,8 @@ def detect():
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             if len(det):
                 # Rescale boxes from img_size to im0 size
-                scale_coords(img.shape[2:], det[:, :4], im0.shape, kpt_label=False)
-                scale_coords(img.shape[2:], det[:, 6:], im0.shape, kpt_label=kpt_label, step=3)
+                scale_coords(img.shape[2:], det[:, :4], im0.shape[:2], kpt_label=False)  # xywh
+                scale_coords(img.shape[2:], det[:, 6:], im0.shape[:2], kpt_label=kpt_label, step=3)  # (xyv)*
 
                 # Print results
                 for c in det[:, 5].unique():
