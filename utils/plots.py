@@ -54,7 +54,7 @@ def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
     return filtfilt(b, a, data)  # forward-backward filter
 
 
-def plot_one_box(x, im, orig_shape, color=None, label=None, line_thickness=3, nkpt=17, kpts=None, steps=2, skeleton=None):
+def plot_one_box(x, im, orig_shape, color=None, label=None, line_thickness=2, kpts=None, steps=2, skeleton=None):
     # Plots one bounding box on image 'im' using OpenCV
     assert im.data.contiguous, 'Image not contiguous. Apply np.ascontiguousarray(im) to plot_on_box() input image.'
     tl = line_thickness or round(0.002 * (im.shape[0] + im.shape[1]) / 2) + 1  # line/font thickness
@@ -69,7 +69,7 @@ def plot_one_box(x, im, orig_shape, color=None, label=None, line_thickness=3, nk
             c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
             cv2.rectangle(im, c1, c2, color, -1, cv2.LINE_AA)  # filled
             cv2.putText(im, label, (c1[0], c1[1] - 2), 0, tl / 6, [225, 255, 255], thickness=tf//2, lineType=cv2.LINE_AA)
-    if nkpt:
+    if kpts is not None:
         plot_skeleton_kpts(im, orig_shape, kpts, steps, skeleton)
 
 
@@ -142,11 +142,11 @@ def plot_images(
     if np.max(images[0]) <= 1:
         images *= 255
 
-    tl = 3  # line thickness
-    tf = max(tl - 1, 1)  # font thickness
-    bs, _, h, w = images.shape  # batch size, _, height, width
-    bs = min(bs, max_subplots)  # limit plot images
-    ns = np.ceil(bs ** 0.5)  # number of subplots (square)
+    line_thickness = 3  # line thickness
+    font_thickness = max(line_thickness - 1, 1)  # font thickness
+    batch_size, _, h, w = images.shape  # batch size, _, height, width
+    batch_size = min(batch_size, max_subplots)  # limit plot images
+    num_subplots = np.ceil(batch_size ** 0.5)  # number of subplots (square)
 
     # Check if we should resize
     scale_factor_w = min(shape[1] / w, 1.)
@@ -156,13 +156,13 @@ def plot_images(
     w = math.ceil(scale_factor_w * w)
 
     colors = color_list()  # list of colors
-    mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)
+    mosaic = np.full((int(num_subplots * h), int(num_subplots * w), 3), 255, dtype=np.uint8)
     for i, img in enumerate(images):
         if i == max_subplots:  # if last batch has fewer images than we expect
             break
 
-        block_x = int(w * (i // ns))
-        block_y = int(h * (i % ns))
+        block_x = int(w * (i // num_subplots))
+        block_y = int(h * (i % num_subplots))
 
         img = img.transpose(1, 2, 0)
         if shape[2] == 1:
@@ -210,23 +210,23 @@ def plot_images(
                 if labels or conf[j] > 0.1:  # 0.25 conf thresh
                     label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
                     if nkpt:
-                        plot_one_box(box, mosaic, shape, label=label, color=color, line_thickness=tl, nkpt=nkpt, kpts=kpts[:,j], steps=steps, skeleton=skeleton)
+                        plot_one_box(box, mosaic, shape, label=label, color=color, line_thickness=line_thickness, kpts=kpts[:,j], steps=steps, skeleton=skeleton)
                     else:
-                        plot_one_box(box, mosaic, shape, label=label, color=color, line_thickness=tl, nkpt=nkpt)
+                        plot_one_box(box, mosaic, shape, label=label, color=color, line_thickness=line_thickness)
 
         # Draw image filename labels
         if paths:
             label = Path(paths[i]).name[:40]  # trim to 40 char
-            t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
-            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness=tf,
+            t_size = cv2.getTextSize(label, 0, fontScale=line_thickness / 3, thickness=font_thickness)[0]
+            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, line_thickness / 3, [220, 220, 220], thickness=font_thickness,
                         lineType=cv2.LINE_AA)
 
         # Image border
         cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness=3)
 
     if fname:
-        r = min(1280. / max(h, w) / ns, 1.0)  # ratio to limit image size
-        mosaic = cv2.resize(mosaic, (int(ns * w * r), int(ns * h * r)), interpolation=cv2.INTER_AREA)
+        r = min(1280. / max(h, w) / num_subplots, 1.0)  # ratio to limit image size
+        mosaic = cv2.resize(mosaic, (int(num_subplots * w * r), int(num_subplots * h * r)), interpolation=cv2.INTER_AREA)
         # cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))  # cv2 save
         Image.fromarray(mosaic).save(fname)  # PIL save
     return mosaic
