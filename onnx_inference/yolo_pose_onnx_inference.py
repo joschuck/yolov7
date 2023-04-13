@@ -65,7 +65,7 @@ def get_image_files(directory_path: Union[Path, str]) -> List[str]:
 
 def read_img(img_file, img_shape):
     h, w, ch = img_shape
-    img = cv2.imread(img_file, cv2.IMREAD_COLOR if ch > 1 else cv2.IMREAD_GRAYSCALE)
+    img = cv2.imread(img_file, cv2.IMREAD_COLOR if ch > 1 else cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
     return img
 
 def prepare_input(img, img_shape, img_mean=127.5, img_scale=1/127.5):
@@ -104,7 +104,8 @@ def model_inference_image_list(model_path: str, data_dict, img_path: str, img_sh
         _input = prepare_input(img, img_shape, mean, scale)
         output = model_inference(model_path, _input)
         dst_file = os.path.join(dst_path, os.path.basename(img_file))
-        post_process(img_file, dst_file, output[0][0], data_dict["skeleton"])
+        if output[0].size:
+            post_process(img_file, dst_file, output[0][0], data_dict["skeleton"])
 
 
 def post_process(img_file, dst_file, output, skeleton, score_threshold=0.45):

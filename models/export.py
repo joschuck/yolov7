@@ -142,7 +142,7 @@ if __name__ == '__main__':
 
         print(f'{prefix} starting export with coremltools {ct.__version__}...')
         # convert model from torchscript and apply pixel scaling as per detect.py
-        model = ct.convert(ts, inputs=[ct.ImageType(name='image', shape=img.shape, scale=1 / 255.0, bias=[0, 0, 0])])
+        model = ct.convert(ts, inputs=[ct.ImageType(name='image', shape=img.shape, scale=1 / np.max(img), bias=[0, 0, 0])])
         f = opt.weights.replace('.pt', '.mlmodel')  # filename
         model.save(f)
         print(f'{prefix} export success, saved as {f} ({file_size(f):.1f} MB)')

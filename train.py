@@ -304,7 +304,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
         optimizer.zero_grad()
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
             ni = i + nb * epoch  # number integrated batches (since train start)
-            imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
+            imgs = imgs.to(device, non_blocking=True).float() / torch.max(imgs)   # uint8 to float32, 0-255 to 0.0-1.0
 
             # Warmup
             if ni <= nw:
@@ -358,7 +358,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
                     '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
-                if plots and i < 3:  # 3 images per epoch
+                if plots and (epoch % 20 == 0) and i == 0:  # every tenth epoch
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
                     result = plot_images(imgs, targets, paths, f, skeleton=data_dict['skeleton'], nkpt=nkpt, shape=img_shape)
                     if tb_writer:
@@ -533,8 +533,9 @@ if __name__ == '__main__':
     opt.global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
     set_logging(opt.global_rank)
     if opt.global_rank in [-1, 0]:
-        check_git_status()
-        check_requirements(exclude=('pycocotools', 'thop'))
+        pass
+        #check_git_status()
+        #check_requirements(exclude=('pycocotools', 'thop'))
 
     # Resume
     wandb_run = check_wandb_resume(opt)

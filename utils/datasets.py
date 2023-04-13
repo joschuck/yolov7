@@ -7,6 +7,7 @@ import os
 import random
 import shutil
 import time
+import traceback
 from itertools import repeat
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
@@ -183,7 +184,7 @@ class LoadImages:  # for inference
         else:
             # Read image
             self.count += 1
-            img0 = cv2.imread(path, cv2.IMREAD_COLOR if self.img_shape[2] > 1 else cv2.IMREAD_GRAYSCALE)
+            img0 = cv2.imread(path, cv2.IMREAD_COLOR if self.img_shape[2] > 1 else cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
             assert img0 is not None, 'Image Not Found ' + path
             print(f'image {self.count}/{self.nf} {path}: ', end='')
 
@@ -508,7 +509,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 x[im_file] = [l, shape, segments]
             except Exception as e:
                 nc += 1
-                print(f'{prefix}WARNING: Ignoring corrupted image and/or label {im_file}: {e}')
+                print(f'{prefix}WARNING: Ignoring corrupted image and/or label {im_file}: {e} {traceback.format_exc()}')
 
             pbar.desc = f"{prefix}Scanning '{path.parent / path.stem}' images and labels... " \
                         f"{nf} found, {nm} missing, {ne} empty, {nc} corrupted"
@@ -610,7 +611,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 if nL:
                     labels[:, 1] = 1 - labels[:, 1]
                     if self.kpt_label:
-                        labels[:, 5::2] = (1 - labels[:, 5::2])*(labels[:, 5::2]!=0)
+                        labels[:, 5::2] = (1 - labels[:, 5::2]) * (labels[:, 5::2] != 0)
                         labels[:, 5::2] = labels[:, 5::2][:, self.flip_index]
                         labels[:, 6::2] = labels[:, 6::2][:, self.flip_index]
 
@@ -633,7 +634,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         img = np.ascontiguousarray(img)
         #if np.any(np.array(before_shape)>639):
         #print("\nbefore:", before_shape, "after:", img.shape)
-        return torch.from_numpy(img), labels_out, self.img_files[index], shapes
+        return torch.from_numpy(img.astype(np.int32)), labels_out, self.img_files[index], shapes
 
     @staticmethod
     def collate_fn(batch):
@@ -675,7 +676,7 @@ def load_image(self, index):
     img = self.imgs[index]
     if img is None:  # not cached
         path = self.img_files[index]
-        img = cv2.imread(path, cv2.IMREAD_COLOR if self.img_shape[2] > 1 else cv2.IMREAD_GRAYSCALE)  # BGR
+        img = cv2.imread(path, cv2.IMREAD_COLOR if self.img_shape[2] > 1 else cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)  # BGR
         assert img is not None, 'Image Not Found ' + path
         h0, w0 = img.shape[:2]  # orig hw
         r_w = self.img_shape[1] / w0
@@ -1083,7 +1084,7 @@ def extract_boxes(path='../coco128/', grayscale = False):  # from utils.datasets
     for im_file in tqdm(files, total=n):
         if im_file.suffix[1:] in img_formats:
             # image
-            im = cv2.imread(str(im_file), cv2.IMREAD_COLOR if grayscale else cv2.IMREAD_GRAYSCALE)[..., ::-1]  # BGR to RGB
+            im = cv2.imread(str(im_file), cv2.IMREAD_COLOR if grayscale else cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)[..., ::-1]  # BGR to RGB
             h, w = im.shape[:2]
 
             # labels
@@ -1129,3 +1130,5 @@ def autosplit(path='../coco128', weights=(0.9, 0.1, 0.0), annotated_only=False):
         if not annotated_only or Path(img2label_paths([str(img)])[0]).exists():  # check label
             with open(path / txt[i], 'a') as f:
                 f.write(str(img) + '\n')  # add image to txt file
+
+
