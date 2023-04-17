@@ -1,6 +1,7 @@
 import argparse
 import sys
 import time
+import traceback
 import warnings
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
@@ -12,33 +13,39 @@ from torch.utils.mobile_optimizer import optimize_for_mobile
 import models
 from models.experimental import attempt_load, End2End
 from utils.activations import Hardswish, SiLU
-from utils.general import set_logging, check_img_size
+from utils.general import set_logging, check_img_shape
 from utils.torch_utils import select_device
 from utils.add_nms import RegisterNMS
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='./yolor-csp-c.pt', help='weights path')
-    parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='image size')  # height, width
-    parser.add_argument('--batch-size', type=int, default=1, help='batch size')
+    parser.add_argument('-w', '--weights', type=str, help='weights path')
+    parser.add_argument('-shape', '--img-shape', nargs='+', type=int, default=[640, 640, 3], help='image shape (h, w, ch)')
+    parser.add_argument('-bs', '--batch-size', type=int, default=1, help='batch size')
+    parser.add_argument('-o', "--output-filename", type=str, default="", help='output file name')
     parser.add_argument('--dynamic', action='store_true', help='dynamic ONNX axes')
     parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
     parser.add_argument('--grid', action='store_true', help='export Detect() layer grid')
     parser.add_argument('--end2end', action='store_true', help='export end2end onnx')
-    parser.add_argument('--max-wh', type=int, default=None, help='None for tensorrt nms, int value for onnx-runtime nms')
+    parser.add_argument('--max-wh', type=int, default=None,
+                        help='None for tensorrt nms, int value for onnx-runtime nms')
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='conf threshold for NMS')
-    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu, or mps')
     parser.add_argument('--simplify', action='store_true', help='simplify onnx model')
     parser.add_argument('--include-nms', action='store_true', help='export end2end onnx')
     parser.add_argument('--fp16', action='store_true', help='CoreML FP16 half-precision export')
     parser.add_argument('--int8', action='store_true', help='CoreML INT8 quantization')
+
     opt = parser.parse_args()
-    opt.img_size *= 2 if len(opt.img_size) == 1 else 1  # expand
+
     opt.dynamic = opt.dynamic and not opt.end2end
     opt.dynamic = False if opt.dynamic_batch else opt.dynamic
+
     print(opt)
+
     set_logging()
     t = time.time()
 
@@ -49,10 +56,11 @@ if __name__ == '__main__':
 
     # Checks
     gs = int(max(model.stride))  # grid size (max stride)
-    opt.img_size = [check_img_size(x, gs) for x in opt.img_size]  # verify img_size are gs-multiples
+    opt.img_shape = check_img_shape(opt.img_shape, gs) # verify img_size are gs-multiples
+    h, w, ch = opt.img_shape
 
     # Input
-    img = torch.zeros(opt.batch_size, 3, *opt.img_size).to(device)  # image size(1,3,320,192) iDetection
+    img = torch.zeros(opt.batch_size, ch, h, w).to(device)
 
     # Update model
     for k, m in model.named_modules():
@@ -70,6 +78,7 @@ if __name__ == '__main__':
         model.model[-1].include_nms = True
         y = None
 
+    """
     # TorchScript export
     try:
         print('\nStarting TorchScript export with torch %s...' % torch.__version__)
@@ -100,8 +109,9 @@ if __name__ == '__main__':
         ct_model.save(f)
         print('CoreML export success, saved as %s' % f)
     except Exception as e:
+        traceback.print_exc()
         print('CoreML export failure: %s' % e)
-                     
+    
     # TorchScript-Lite export
     try:
         print('\nStarting TorchScript-Lite export with torch %s...' % torch.__version__)
@@ -112,19 +122,20 @@ if __name__ == '__main__':
         print('TorchScript-Lite export success, saved as %s' % f)
     except Exception as e:
         print('TorchScript-Lite export failure: %s' % e)
+    """
 
     # ONNX export
     try:
         import onnx
 
         print('\nStarting ONNX export with onnx %s...' % onnx.__version__)
-        f = opt.weights.replace('.pt', '.onnx')  # filename
+        onnx_filename = opt.output_filename if opt.output_filename else opt.weights.replace('.pt', '.onnx')
         model.eval()
         output_names = ['classes', 'boxes'] if y is None else ['output']
         dynamic_axes = None
         if opt.dynamic:
             dynamic_axes = {'images': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
-             'output': {0: 'batch', 2: 'y', 3: 'x'}}
+                            'output': {0: 'batch', 2: 'y', 3: 'x'}}
         if opt.dynamic_batch:
             opt.batch_size = 'batch'
             dynamic_axes = {
@@ -156,12 +167,12 @@ if __name__ == '__main__':
             else:
                 model.model[-1].concat = True
 
-        torch.onnx.export(model, img, f, verbose=False, opset_version=12, input_names=['images'],
+        torch.onnx.export(model, img, onnx_filename, verbose=False, opset_version=12, input_names=['images'],
                           output_names=output_names,
                           dynamic_axes=dynamic_axes)
 
         # Checks
-        onnx_model = onnx.load(f)  # load onnx model
+        onnx_model = onnx.load(onnx_filename)  # load onnx model
         onnx.checker.check_model(onnx_model)  # check onnx model
 
         if opt.end2end and opt.max_wh is None:
@@ -189,16 +200,17 @@ if __name__ == '__main__':
                 print(f'Simplifier failure: {e}')
 
         # print(onnx.helper.printable_graph(onnx_model.graph))  # print a human readable model
-        onnx.save(onnx_model,f)
-        print('ONNX export success, saved as %s' % f)
+        onnx.save(onnx_model, onnx_filename)
+        print('ONNX export success, saved as %s' % onnx_filename)
 
         if opt.include_nms:
             print('Registering NMS plugin for ONNX...')
-            mo = RegisterNMS(f)
+            mo = RegisterNMS(onnx_filename)
             mo.register_nms()
-            mo.save(f)
+            mo.save(onnx_filename)
 
     except Exception as e:
+        traceback.print_exc()
         print('ONNX export failure: %s' % e)
 
     # Finish
