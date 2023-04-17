@@ -34,9 +34,9 @@ from utils.google_utils import attempt_download
 from utils.loss import ComputeLossOTA
 from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss
-from utils.plots import plot_images, plot_labels, plot_results
-from utils.torch_utils import ModelEMA, intersect_dicts, torch_distributed_zero_first, is_parallel
-from utils.wandb_logging.wandb_utils import WandbLogger
+from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
+from utils.torch_utils import ModelEMA, intersect_dicts, torch_distributed_zero_first, is_parallel, select_device
+from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
 
 logger = logging.getLogger(__name__)
 
@@ -371,20 +371,13 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
 
             # Multi-scale
             if opt.multi_scale:
-                if not keyptoint:
-                    sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
-                    sf = sz / max(imgs.shape[2:])  # scale factor
-                    if sf != 1:
-                        ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]  # new shape (stretched to gs-multiple)
-                        imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
-                else:
-                    sz_w = random.randrange(imgs.shape[3] * 0.5, imgs.shape[3] * 1.5 + gs) // gs * gs  # size
-                    sz_h = random.randrange(imgs.shape[2] * 0.5, imgs.shape[2] * 1.5 + gs) // gs * gs
-                    sf_w = sz_w / imgs.shape[3]  # scale factor
-                    sf_h = sz_h / imgs.shape[2]
-                    ns_w = math.ceil(imgs.shape[3] * sf_w / gs) * gs
-                    ns_h = math.ceil(imgs.shape[2] * sf_h / gs) * gs
-                    imgs = F.interpolate(imgs, size=(ns_h, ns_w), mode='bilinear', align_corners=False)
+                sz_w = random.randrange(imgs.shape[3] * 0.5, imgs.shape[3] * 1.5 + gs) // gs * gs  # size
+                sz_h = random.randrange(imgs.shape[2] * 0.5, imgs.shape[2] * 1.5 + gs) // gs * gs
+                sf_w = sz_w / imgs.shape[3]  # scale factor
+                sf_h = sz_h / imgs.shape[2]
+                ns_w = math.ceil(imgs.shape[3] * sf_w / gs) * gs
+                ns_h = math.ceil(imgs.shape[2] * sf_h / gs) * gs
+                imgs = F.interpolate(imgs, size=(ns_h, ns_w), mode='bilinear', align_corners=False)
 
             # Forward
             with amp.autocast(enabled=cuda):

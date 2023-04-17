@@ -146,7 +146,6 @@ python detect.py --weights yolov7.pt --conf 0.25 --img-size 640 --source inferen
     </a>
 </div>
 
-
 ## Export
 
 **Pytorch to CoreML (and inference on MacOS/iOS)** <a href="https://colab.research.google.com/github/WongKinYiu/yolov7/blob/main/tools/YOLOv7CoreML.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
@@ -179,7 +178,6 @@ python ./tensorrt-python/export.py -o yolov7-tiny.onnx -e yolov7-tiny-nms.trt -p
 /usr/src/tensorrt/bin/trtexec --onnx=yolov7-tiny.onnx --saveEngine=yolov7-tiny-nms.trt --fp16
 ```
 
-</details>
 
 Tested with: Python 3.7.13, Pytorch 1.12.0+cu113
 
