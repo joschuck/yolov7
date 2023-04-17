@@ -55,16 +55,16 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
 
     # Save run settings
     with open(save_dir / 'hyp.yaml', 'w') as f:
-        yaml.safe_dump(hyp, f, sort_keys=False)
+        yaml.dump(hyp, f, sort_keys=False)
     with open(save_dir / 'opt.yaml', 'w') as f:
-        yaml.safe_dump(vars(opt), f, sort_keys=False)
+        yaml.dump(vars(opt), f, sort_keys=False)
 
     # Configure
     plots = not opt.evolve  # create plots
-    cuda = device.type not in('cpu', 'mps')
+    cuda = device.type not in ('cpu', 'mps')
     init_seeds(2 + rank)
     with open(opt.data) as f:
-        data_dict = yaml.safe_load(f)  # data dict
+        data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
     is_coco = opt.data.endswith('coco.yaml')
 
     # Logging- Doing this before checking the dataset. Might update data_dict
@@ -85,13 +85,14 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
     names = ['item'] if opt.single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
     assert len(names) == nc, '%g names found for nc=%g dataset in %s' % (len(names), nc, opt.data)
 
-    nkpt = data_dict['nkpt']
-    kpt_names = data_dict['kpt_names']
-    flip_index = data_dict['flip_index']
-    sigmas = data_dict['sigmas']
-    assert len(flip_index) == nkpt
-    assert len(kpt_names) == nkpt
-    assert len(sigmas) == nkpt
+    nkpt = data_dict.get('nkpt')
+    kpt_names = data_dict.get('kpt_names')
+    flip_index = data_dict.get('flip_index')
+    sigmas = data_dict.get('sigmas')
+    if kpt_label:
+        assert len(flip_index) == nkpt
+        assert len(kpt_names) == nkpt
+        assert len(sigmas) == nkpt
 
     # Model
     pretrained = weights.endswith('.pt')
@@ -259,7 +260,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
 
     # Trainloader
     dataloader, dataset = create_dataloader(train_path, img_shape, batch_size, gs, opt,
-                                            hyp=hyp, augment=True, cache=opt.cache_images, rect=opt.rect, rank=rank,
+                                            hyp=hyp, augment=True, cache=opt.cache_images, rank=rank,
                                             world_size=opt.world_size, workers=opt.workers,
                                             image_weights=opt.image_weights, quad=opt.quad, prefix=colorstr('train: '),
                                             kpt_label=kpt_label, nkpt=nkpt, flip_index=flip_index)
@@ -317,7 +318,6 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
     scaler = amp.GradScaler(enabled=cuda)
 
     compute_loss_ota = ComputeLossOTA(model)  # init loss class
-    compute_loss = ComputeLoss(model)  # init loss class
     compute_loss = ComputeLoss(model, kpt_label=kpt_label)  # init loss class
     logger.info(f'Image sizes {img_shape} train, {img_shape_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
@@ -345,8 +345,6 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
         # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
         # dataset.mosaic_border = [b - imgsz, -b]  # height, width borders
 
-        # mloss = torch.zeros(4, device=device)  # mean losses detection
-        mloss = torch.zeros(6, device=device)  # mean losses
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)
@@ -404,16 +402,18 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
                     ema.update(model)
 
             # Print
+            # mloss = torch.zeros(4, device=device)  # mean losses detection
+            mloss = torch.zeros(len(loss_items), device=device)  # mean losses
             if rank in [-1, 0]:
                 mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
                 mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-                s = ('%10s' * 2 + '%10.4g' * 8) % (
+                s = ('%10s' * 2 + '%10.4g' * (2 + len(loss_items))) % (
                     '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
                 if plots and (epoch % 20 == 0) and i == 0:  # every tenth epoch
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
-                    result = plot_images(imgs, targets, paths, f, skeleton=data_dict['skeleton'], nkpt=nkpt, shape=img_shape)
+                    result = plot_images(imgs, targets, paths, f, skeleton=data_dict.get('skeleton'), nkpt=nkpt, shape=img_shape)
                     if tb_writer:
                         tb_writer.add_image(str(f), result, dataformats='HWC', global_step=epoch)
                         tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])  # add model graph
@@ -561,7 +561,6 @@ if __name__ == '__main__':
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.p5.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs')
-    parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--img-shape', nargs=6, type=int, default=[640, 640, 3, 640, 640, 3], help='[train, test] image sizes')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')

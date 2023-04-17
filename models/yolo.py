@@ -718,14 +718,23 @@ class Model(nn.Module):
         model_info(self, verbose, img_size)
 
 
-def parse_model(d, ch):  # model_dict, input_channels(3)
+def parse_model(model_dict, ch):
     logger.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
-    anchors, nc, nkpt, gd, gw = d['anchors'], d['nc'], d['nkpt'], d['depth_multiple'], d['width_multiple']
+
+    anchors = model_dict.get('anchors')
+    nc = model_dict.get('nc')
+    nkpt = model_dict.get('nkpt')
+    gd = model_dict.get('depth_multiple')
+    gw = model_dict.get('width_multiple')
+
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
-    no = na * (nc + 5 + 2*nkpt)   # number of outputs = anchors * (classes + 5)
+    if nkpt is not None:
+        no = na * (nc + 5 + 2*nkpt)   # number of outputs = anchors * (classes + 5)
+    else:
+        no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-    for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
+    for i, (f, n, m, args) in enumerate(model_dict['backbone'] + model_dict['head']):  # from, number, module, args
         m = eval(m) if isinstance(m, str) else m  # eval strings
         for j, a in enumerate(args):
             try:

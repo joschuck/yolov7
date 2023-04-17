@@ -82,7 +82,7 @@ def test(data,
     # Configure
     model.eval()
     model.model[-1].flip_test = False
-    model.model[-1].flip_index = data['flip_index']
+    model.model[-1].flip_index = data.get('flip_index')
     if isinstance(data, str):
         is_coco = "coco" in data
         with open(data) as f:
@@ -155,7 +155,7 @@ def test(data,
                 targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
             lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
             t = time_synchronized()
-            out = non_max_suppression(out, conf_thres, iou_thres, labels=lb, multi_label=True, agnostic=single_cls, kpt_label=kpt_label, nc=model.yaml['nc'], nkpt=model.yaml['nkpt'])
+            out = non_max_suppression(out, conf_thres, iou_thres, labels=lb, multi_label=True, agnostic=single_cls, kpt_label=kpt_label)
             t1 += time_synchronized() - t
 
         # Statistics per image
