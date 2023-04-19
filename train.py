@@ -261,7 +261,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
                                             hyp=hyp, augment=True, cache=opt.cache_images, rank=rank,
                                             world_size=opt.world_size, workers=opt.workers,
                                             image_weights=opt.image_weights, quad=opt.quad, prefix=colorstr('train: '),
-                                            kpt_label=kpt_label, nkpt=nkpt, flip_index=flip_index)
+                                            kpt_label=kpt_label, nkpt=nkpt, flip_index=flip_index, depthmap=opt.depthmap)
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
     nb = len(dataloader)  # number of batches
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)
@@ -589,6 +589,7 @@ if __name__ == '__main__':
     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone of yolov7=50, first3=0 1 2')
     parser.add_argument('--v5-metric', action='store_true', help='assume maximum recall as 1.0 in AP calculation')
     parser.add_argument('--kpt-label', action='store_true', help='use keypoint labels for training')
+    parser.add_argument('--depthmap', action='store_true', help='input images are depth maps')
     opt = parser.parse_args()
 
     # Set DDP variables
