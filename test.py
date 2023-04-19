@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-from threading import Thread
 
 import numpy as np
 import torch
@@ -266,11 +265,11 @@ def test(data,
         # Plot images
         if plots and batch_i < 3000:
             f = save_dir / f'{path.stem}_labels.jpg'  # labels
-            #Thread(target=plot_images, args=(img, targets, paths, f, names), daemon=True).start()
-            plot_images(img, targets, paths, f, names, kpt_label=kpt_label, orig_shape=shapes[si])
+            nkpt = data.get('nkpt')
+            skeleton = data.get('skeleton')
+            plot_images(img, targets, paths, f, names, nkpt=nkpt, skeleton=skeleton, shape=shapes[si])
             f = save_dir / f'{path.stem}_pred.jpg'  # predictions
-            #Thread(target=plot_images, args=(img, output_to_target(out), paths, f, names), daemon=True).start()
-            plot_images(img, output_to_target(out), paths, f, names, kpt_label=kpt_label, steps=3, orig_shape=shapes[si])
+            plot_images(img, output_to_target(out), paths, f, names, nkpt=nkpt, skeleton=skeleton, steps=3, shape=shapes[si])
 
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy

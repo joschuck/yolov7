@@ -205,6 +205,9 @@ class LoadImages:  # for inference
         img = img[:, :, :].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
 
+        # for 16-bit time-of-flight distance images
+        if img.dtype == np.uint16:
+            img = img.astype(np.int32)
         return path, img, img0, self.cap
 
     def new_video(self, path):

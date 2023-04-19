@@ -6,7 +6,6 @@ import random
 import time
 from copy import deepcopy
 from pathlib import Path
-from threading import Thread
 from typing import Tuple
 
 import numpy as np
@@ -28,9 +27,8 @@ from models.yolo import Model
 from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader
 from utils.general import labels_to_class_weights, increment_path, labels_to_image_weights, init_seeds, \
-    colorstr,  fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_git_status, check_img_shape, \
+    fitness, strip_optimizer, get_latest_run, check_dataset, check_file, check_git_status, check_img_shape, \
     check_requirements, print_mutation, set_logging, one_cycle, colorstr
-from utils.google_utils import attempt_download
 from utils.loss import ComputeLossOTA
 from utils.google_utils import attempt_download
 from utils.loss import ComputeLoss
@@ -348,7 +346,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)
-        logger.info(('\n' + '%10s' * 10) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'kpt', 'kptv' ,'total', 'labels', 'img_size'))
+        logger.info(('\n' + '%10s' * 10) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'kpt', 'kptv', 'total', 'labels', 'img_size'))
         if rank in [-1, 0]:
             pbar = tqdm(pbar, total=nb)  # progress bar
         optimizer.zero_grad()
@@ -413,7 +411,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
 
                 if plots and (epoch % 20 == 0) and i == 0:  # every tenth epoch
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
-                    result = plot_images(imgs, targets, paths, f, skeleton=data_dict.get('skeleton'), nkpt=nkpt, shape=img_shape)
+                    result = plot_images(imgs, targets, paths, f, names=names, skeleton=data_dict.get('skeleton'), nkpt=nkpt, shape=img_shape)
                     if tb_writer:
                         tb_writer.add_image(str(f), result, dataformats='HWC', global_step=epoch)
                         tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])  # add model graph

@@ -69,7 +69,7 @@ def detect():
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= np.max(img)  # 0 - 255 to 0.0 - 1.0
+        img /= torch.max(img)  # 0 - 255 to 0.0 - 1.0
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
 
@@ -92,8 +92,7 @@ def detect():
             pred,
             opt.conf_thres,
             opt.iou_thres,
-            nc=data_dict['nc'],
-            kpt_label=data_dict['nkpt'] > 0,
+            kpt_label=data_dict.get('nkpt'),
             agnostic=opt.agnostic_nms)
         t3 = time_synchronized()
 
@@ -118,7 +117,8 @@ def detect():
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 scale_coords(img.shape[2:], det[:, :4], im0.shape[:2], kpt_label=False)  # xywh
-                scale_coords(img.shape[2:], det[:, 6:], im0.shape[:2], kpt_label=kpt_label, step=3)  # (xyv)*
+                if kpt_label:
+                    scale_coords(img.shape[2:], det[:, 6:], im0.shape[:2], kpt_label=kpt_label, step=3)  # (xyv)*
 
                 # Print results
                 for c in det[:, 5].unique():
@@ -135,9 +135,9 @@ def detect():
 
                     if save_img or view_img:  # Add bbox to image
                         label = f'{names[int(cls)]} {conf:.2f}'
-                        kpts = det[det_index, 6:]
+                        kpts = det[det_index, 6:] if kpt_label else None
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=opt.line_thickness,
-                                     kpts=kpts, steps=3, orig_shape=im0.shape[:2], skeleton=data_dict['skeleton'])
+                                     kpts=kpts, steps=3, orig_shape=im0.shape[:2], skeleton=data_dict.get('skeleton'))
 
             # Print time (inference + NMS)
             print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')

@@ -170,3 +170,4 @@ cython_debug/
 /viz_kpts/
 /phase_kpts/
 /runs/
+/utils/roommate.py
