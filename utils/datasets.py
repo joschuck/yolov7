@@ -30,6 +30,7 @@ from torchvision.ops import roi_pool, roi_align, ps_roi_pool, ps_roi_align
 
 from utils.general import check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes, \
     resample_segments, clean_str
+from utils.roommate import get_auc_indices, randomize_distance
 from utils.torch_utils import torch_distributed_zero_first
 
 # Parameters
@@ -65,7 +66,7 @@ def exif_size(img):
 
 
 def create_dataloader(path, img_shape, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0,
-                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', tidl_load=False, kpt_label=False, nkpt=0, flip_index=None):
+                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', tidl_load=False, kpt_label=False, nkpt=0, flip_index=None, depthmap=False):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
         dataset = LoadImagesAndLabels(path,
@@ -82,7 +83,8 @@ def create_dataloader(path, img_shape, batch_size, stride, opt, hyp=None, augmen
                                       tidl_load=tidl_load,
                                       kpt_label=kpt_label,
                                       nkpt=nkpt,
-                                      flip_index=flip_index)
+                                      flip_index=flip_index,
+                                      depthmap=depthmap)
 
     batch_size = min(batch_size, len(dataset))
     nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, workers])  # number of workers
@@ -367,7 +369,7 @@ def img2label_paths(img_paths):
 class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_shape: Tuple[int, int, int]=(640, 640, 3), batch_size=16, augment=False, hyp=None, image_weights=False,
                  cache_images=False, single_cls=False, stride=32, pad=0.0, prefix='',square=False, tidl_load=False,
-                 kpt_label=False, nkpt=0, flip_index=None):
+                 kpt_label=False, nkpt=0, flip_index=None, depthmap=False):
         self.img_shape = img_shape
         self.augment = augment
         self.hyp = hyp
@@ -380,6 +382,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.kpt_label = kpt_label
         self.nkpt = nkpt
         self.flip_index = flip_index
+        self.depthmap = depthmap
 
         try:
             f = []  # image files
@@ -584,15 +587,22 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1], kpt_label=self.kpt_label)
 
         if self.augment:
+            if not mosaic and self.depthmap and random.random() < hyp.get('shift_dist', 0):
+                _max = np.iinfo(img.dtype).max
+                hist, bins = np.histogram(img, bins=_max, range=(0, _max))
+                lower_percentile, upper_percentile = get_auc_indices(hist, (0.005, 0.995))
+                img = randomize_distance(img, (lower_percentile, upper_percentile))
+
+
             # Augment imagespace
-            if not mosaic:
-                img, labels = random_perspective(img, labels,
-                                                 degrees=hyp['degrees'],
-                                                 translate=hyp['translate'],
-                                                 scale=hyp['scale'],
-                                                 shear=hyp['shear'],
-                                                 perspective=hyp['perspective'],
-                                                 num_kpts=self.nkpt)
+            #if not mosaic:
+            #    img, labels = random_perspective(img, labels,
+            #                                     degrees=hyp['degrees'],
+            #                                     translate=hyp['translate'],
+            #                                     scale=hyp['scale'],
+            #                                     shear=hyp['shear'],
+            #                                     perspective=hyp['perspective'],
+            #                                     num_kpts=self.nkpt)
 
             # Augment colorspace
             if self.img_shape[2] == 3:
@@ -1095,8 +1105,10 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
         if perspective:
             img = cv2.warpPerspective(img, M, dsize=(width, height), borderValue=(114, 114, 114))
         else:  # affine
-            img = cv2.warpAffine(img, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
-
+            try:
+                img = cv2.warpAffine(img, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
+            except Exception:
+                print("asdasd")
     # Visualize
     # import matplotlib.pyplot as plt
     # ax = plt.subplots(1, 2, figsize=(12, 6))[1].ravel()
