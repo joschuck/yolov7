@@ -113,6 +113,7 @@ def plot_images(
     nkpt=17,
     skeleton=None,
     steps=2,
+    channel=None
 ):
     # Plot image grid with labels
 
@@ -148,8 +149,10 @@ def plot_images(
         block_y = int(h * (i % num_subplots))
 
         img = img.transpose(1, 2, 0)
-        if shape[2] == 1:
+        if isinstance(channel, int):
+            img = img[:,:,channel,np.newaxis]
             img = np.repeat(img, 3, axis=-1)
+
         img = cv2.resize(img, (w, h))
 
         mosaic[block_y:block_y + h, block_x:block_x + w, :] = img

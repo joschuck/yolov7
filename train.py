@@ -285,7 +285,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
 
             # Anchors
             if not opt.noautoanchor and device.type != 'mps':  # mps SIGSEGVs
-                check_anchors(dataset, model=model, thr=hyp['anchor_t'], img_shape=(img_shape[1], img_shape[0]))
+                check_anchors(dataset, model=model, thr=hyp['anchor_t'], img_shape=img_shape)
             model.half().float()  # pre-reduce anchor precision
 
     # DDP mode
@@ -346,7 +346,13 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
         pbar = enumerate(dataloader)
-        logger.info(('\n' + '%10s' * 10) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'kpt', 'kptv', 'total', 'labels', 'img_size'))
+
+        header_elements = ['Epoch', 'gpu_mem', 'box', 'obj', 'cls']
+        if kpt_label:
+            header_elements += ['kpt', 'kptv']
+        header_elements += ['total', 'labels', 'img_size']
+        header_str = "\n" + " ".join(header_elements)
+        logger.info(header_str)
         if rank in [-1, 0]:
             pbar = tqdm(pbar, total=nb)  # progress bar
         optimizer.zero_grad()
@@ -410,11 +416,17 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
                 pbar.set_description(s)
 
                 if plots and (epoch % 20 == 0) and i == 0:  # every tenth epoch
-                    f = save_dir / f'train_batch{ni}.jpg'  # filename
-                    result = plot_images(imgs, targets, paths, f, names=names, skeleton=data_dict.get('skeleton'), nkpt=nkpt, shape=img_shape)
-                    if tb_writer:
-                        tb_writer.add_image(str(f), result, dataformats='HWC', global_step=epoch)
-                        tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])  # add model graph
+                    modalities = [("", None)]  # color
+                    if img_shape[2] == 1:  # amp or depth / grayscale
+                        modalities = [("depth", None)] if opt.depthmap else [("amp", None)]
+                    if img_shape[2] == 2:  # amp+depth
+                        modalities = [("amp", 0), ("depth", 1)]
+                    for modality, channel in modalities:
+                        f = save_dir / f'train_batch_{modality}{ni}.jpg'  # filename
+                        result = plot_images(imgs, targets, paths, f, names=names, skeleton=data_dict.get('skeleton'), nkpt=nkpt, shape=img_shape, channel=channel)
+                        if tb_writer:
+                            tb_writer.add_image(str(f), result, dataformats='HWC', global_step=epoch)
+                            tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])  # add model graph
                 elif plots and ni == 10 and wandb_logger.wandb:
                     wandb_logger.log({"Mosaics": [wandb_logger.wandb.Image(str(x), caption=x.name) for x in
                                                   save_dir.glob('train*.jpg') if x.exists()]})
@@ -439,6 +451,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
                                                  model=ema.ema,
                                                  single_cls=opt.single_cls,
                                                  dataloader=testloader,
+                                                 half_precision=False,
                                                  save_dir=save_dir,
                                                  verbose=nc < 50 and final_epoch,
                                                  plots=plots and final_epoch,
@@ -456,7 +469,7 @@ def train(hyp, img_shapes: Tuple[Tuple[int, int, int], Tuple[int, int, int]], op
 
             # Log
             train_tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss']
-            if nkpt:
+            if kpt_label:
                 train_tags += ['train/kpt_loss', 'train/kptv_loss']
             metrics_tags = ['metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95']
             val_tags = ['val/box_loss', 'val/obj_loss', 'val/cls_loss']

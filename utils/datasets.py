@@ -35,7 +35,7 @@ from utils.torch_utils import torch_distributed_zero_first
 
 # Parameters
 help_url = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
-img_formats = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo']  # acceptable image suffixes
+img_formats = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo', "npy"]  # acceptable image suffixes
 vid_formats = ['mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv']  # acceptable video suffixes
 logger = logging.getLogger(__name__)
 
@@ -192,7 +192,13 @@ class LoadImages:  # for inference
         else:
             # Read image
             self.count += 1
-            img0 = cv2.imread(path, cv2.IMREAD_COLOR if self.img_shape[2] > 1 else cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
+            if path.endswith(".npy"):
+                img0 = np.load(path)
+            elif self.img_shape[2] > 1:
+                img0 = cv2.imread(path, cv2.IMREAD_COLOR)
+            else:
+                img0 = cv2.imread(path, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)  # BGR
+
             assert img0 is not None, 'Image Not Found ' + path
             print(f'image {self.count}/{self.nf} {path}: ', end='')
 
@@ -469,13 +475,17 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         for i, (im_file, lb_file) in enumerate(pbar):
             try:
                 # verify images
-                im = Image.open(im_file)
-                im.verify()  # PIL verify
-                shape = exif_size(im)  # image size
+                if im_file.endswith(".npy"):
+                    im = np.load(im_file)
+                    shape = im.shape
+                else:
+                    im = Image.open(im_file)
+                    im.verify()  # PIL verify
+                    shape = exif_size(im)  # image size
+                    assert im.format.lower() in img_formats, f'invalid image format {im.format}'
+
                 segments = []  # instance segments
                 assert (shape[0] > 9) & (shape[1] > 9), f'image size {shape} <10 pixels'
-                assert im.format.lower() in img_formats, f'invalid image format {im.format}'
-
                 # verify labels
                 label_size = -1
                 if os.path.isfile(lb_file):
@@ -587,10 +597,13 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1], kpt_label=self.kpt_label)
 
         if self.augment:
-            if not mosaic and self.depthmap and random.random() < hyp.get('shift_dist', 0):
-                _max = np.iinfo(img.dtype).max
-                hist, bins = np.histogram(img, bins=_max, range=(0, _max))
-                lower_percentile, upper_percentile = get_auc_indices(hist, (0.005, 0.995))
+            if self.depthmap and random.random() < hyp.get('scale_dist', 0):
+                img = (img * random.uniform(0.7, 1.3)).astype(img.dtype)
+
+            if self.depthmap and random.random() < hyp.get('shift_dist', 0):
+                max_dist = 10_000 # mm
+                hist, bins = np.histogram(img, bins=max_dist, range=(0, max_dist))
+                lower_percentile, upper_percentile = get_auc_indices(hist)
                 img = randomize_distance(img, (lower_percentile, upper_percentile))
 
 
@@ -660,12 +673,13 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             else:
                 labels_out[:, 1:] = torch.from_numpy(labels[:, :5])
 
-
         # Convert
+        #print(self.img_shape)
         if self.img_shape[2] == 3:
             img = img[:, :, ::-1]  # BGR to RGB
-        else:
+        elif self.img_shape[2] == 1:
             img = np.reshape(img, (*img.shape, 1))
+
         # to chx416x416
         img = img[:, :, :].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
@@ -713,13 +727,22 @@ def load_image(self, index):
     img = self.imgs[index]
     if img is None:  # not cached
         path = self.img_files[index]
-        img = cv2.imread(path, cv2.IMREAD_COLOR if self.img_shape[2] > 1 else cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)  # BGR
+        if path.endswith(".npy"):
+            img = np.load(path)
+        elif self.img_shape[2] > 1:
+            img = cv2.imread(path, cv2.IMREAD_COLOR)
+        else:
+            img = cv2.imread(path, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)  # BGR
         assert img is not None, 'Image Not Found ' + path
         h0, w0 = img.shape[:2]  # orig hw
         r_w = self.img_shape[1] / w0
         r_h = self.img_shape[0] / h0
         if r_w != 1 or r_h != 1:
             img = cv2.resize(img, (int(w0 * r_w), int(h0 * r_h)))
+
+        # todo Remove again, this is temporary and should be fixed in Blender simulation creation
+        if "dumps" not in path:
+            img = (img / 10).astype(img.dtype)
 
         return img, (h0, w0), img.shape[:2]  # img, hw_original, hw_resized
     else:
@@ -769,7 +792,7 @@ def load_mosaic(self, index):
         # place img in img4
         if i == 0:  # top left
             img4_shape = (sh * 2, sw * 2, self.img_shape[2]) if self.img_shape[2] > 1 else (sh * 2, sw * 2)
-            img4 = np.full(img4_shape, 114, dtype=np.uint8)  # base image with 4 tiles
+            img4 = np.full(img4_shape, 114, dtype=img.dtype)  # base image with 4 tiles
             x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
             x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
         elif i == 1:  # top right
@@ -1105,10 +1128,7 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
         if perspective:
             img = cv2.warpPerspective(img, M, dsize=(width, height), borderValue=(114, 114, 114))
         else:  # affine
-            try:
-                img = cv2.warpAffine(img, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
-            except Exception:
-                print("asdasd")
+            img = cv2.warpAffine(img, M[:2], dsize=(width, height), borderValue=(114, 114, 114))
     # Visualize
     # import matplotlib.pyplot as plt
     # ax = plt.subplots(1, 2, figsize=(12, 6))[1].ravel()
@@ -1330,8 +1350,15 @@ def extract_boxes(path='../coco128/', grayscale = False):  # from utils.datasets
     n = len(files)  # number of files
     for im_file in tqdm(files, total=n):
         if im_file.suffix[1:] in img_formats:
+            im_file = str(im_file)
             # image
-            im = cv2.imread(str(im_file), cv2.IMREAD_COLOR if grayscale else cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)[..., ::-1]  # BGR to RGB
+            if im_file.endswith(".npy"):
+                im = np.load(path)
+            elif not grayscale:
+                im = cv2.imread(path, cv2.IMREAD_COLOR)[..., ::-1]  # BGR to RGB
+            else:
+                im = cv2.imread(path, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)  # BGR
+
             h, w = im.shape[:2]
 
             # labels
